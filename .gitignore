@@ -1,0 +1,10 @@
+node_modules/
+
+
+.vscode/
+
+__pycache__/
+
+.env
+
+bash.exe.stackdump
