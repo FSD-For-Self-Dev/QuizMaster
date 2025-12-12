@@ -10,6 +10,7 @@ import { QuizPlayer } from './components/QuizPlayer';
 import { QuizModeSelector } from './components/QuizModeSelector';
 import { CooperateSetup } from './components/CooperateSetup';
 import { CooperativeQuizPlayer } from './components/CooperativeQuizPlayer';
+import { CooperativeJeopardyPlayer } from './components/CooperativeJeopardyPlayer';
 import { GuestUserSetup } from './components/GuestUserSetup';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
@@ -245,6 +246,11 @@ function App() {
               <Route path="/cooperative-quiz" element={
                 <PublicRoute>
                   <CooperativeQuizPlayer />
+                </PublicRoute>
+              } />
+              <Route path="/cooperative-jeopardy" element={
+                <PublicRoute>
+                  <CooperativeJeopardyPlayer />
                 </PublicRoute>
               } />
 

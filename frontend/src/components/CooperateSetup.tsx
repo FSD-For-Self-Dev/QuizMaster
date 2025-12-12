@@ -536,6 +536,48 @@ export const CooperateSetup: React.FC = () => {
         break;
       }
 
+      case 'cooperative_jeopardy_start': {
+        console.log('Cooperative jeopardy starting, navigating to CooperativeJeopardyPlayer');
+
+        if (isJoining) {
+          const current = roomStateRef.current;
+
+          const effectiveRoomId =
+            current.id ||
+            (data?.room_id ?? null);
+
+          if (!effectiveRoomId) {
+            console.error('Cannot navigate to CooperativeJeopardyPlayer: no roomId');
+            return;
+          }
+
+          const participants = current.room?.participants || [];
+
+          const effectiveQuiz = quiz || {
+            id: current.room?.quiz_id,
+            title: current.room?.quiz_title ?? '',
+            description: current.room?.quiz_description ?? '',
+            type: (current.room?.quiz_type as Quiz['type']) || 'jeopardy',
+            questions_count: current.room?.quiz_questions_count ?? 0,
+            settings: {},
+            questions: [],
+          };
+
+          const effectiveParticipantId = current.currentParticipantId ?? null;
+
+          navigate('/cooperative-jeopardy', {
+            state: {
+              quiz: effectiveQuiz,
+              roomId: effectiveRoomId,
+              isHost: false,
+              currentParticipantId: effectiveParticipantId,
+              participants,
+            },
+          });
+        }
+        break;
+      }
+
       default:
         console.log('Unhandled WebSocket message type:', type, data);
     }
@@ -584,8 +626,13 @@ export const CooperateSetup: React.FC = () => {
 
     // 1) Broadcast start over WebSocket so guests can navigate too
     if (roomState.wsConnection) {
+      const startType =
+        roomState.room.quiz_type === 'jeopardy'
+          ? 'cooperative_jeopardy_start'
+          : 'cooperative_quiz_start';
+
       const payload = {
-        type: 'cooperative_quiz_start',
+        type: startType,
         data: {
           room_id: roomState.id,
           quiz_id: roomState.room.quiz_id,
@@ -595,12 +642,15 @@ export const CooperateSetup: React.FC = () => {
       try {
         roomState.wsConnection.send(JSON.stringify(payload));
       } catch (e) {
-        console.error('Failed to send cooperative_quiz_start:', e);
+        console.error(`Failed to send ${startType}:`, e);
       }
     }
 
     // 2) Host navigates to quiz
-    navigate('/cooperative-quiz', {
+    const hostRoute =
+      roomState.room.quiz_type === 'jeopardy' ? '/cooperative-jeopardy' : '/cooperative-quiz';
+
+    navigate(hostRoute, {
       state: {
         quiz: {
           id: roomState.room.quiz_id,

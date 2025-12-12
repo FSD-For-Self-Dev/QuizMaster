@@ -140,7 +140,6 @@ export const QuizModeSelector: React.FC = () => {
                   <li>• See real-time progress of all players</li>
                   <li>• Compare results and final ratings</li>
                 </ul>
-                <div className="mode-badge">Coming Soon</div>
               </div>
               <div className="mode-arrow">→</div>
             </motion.div>

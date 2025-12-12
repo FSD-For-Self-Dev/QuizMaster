@@ -1,994 +1,1240 @@
-// import React, { useEffect, useMemo, useRef, useState } from 'react';
-// import { motion } from 'framer-motion';
-// import { api, Question, RoomParticipant, resolveMediaUrl } from '../api'; // adjust path as needed
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import {
+  api,
+  type Quiz,
+  type Question,
+  type RoomParticipant,
+  resolveMediaUrl,
+} from '../api';
 import './CooperativeJeopardyPlayer.css';
 
-// type JeopardyCategoryMap = Record<string, Question[]>;
-
-// type CooperativeAnswer = {
-//   participant_id: string;
-//   participant_name: string;
-//   question_id: string;
-//   answer_id: string; // for short_answer we store typed text here, for skip => "NO_ANSWER"
-//   is_correct: boolean;
-//   time_taken: number; // ms
-// };
-
-// type RatingRow = {
-//   participant_id: string;
-//   participant_name: string;
-//   total_score: number;
-//   rating_change: number;
-// };
-
-// type QuestionResultsPayload = {
-//   question_id: string;
-//   all_answers: CooperativeAnswer[];
-//   ratings: RatingRow[];
-// };
-
-// type FinalResultsPayload = {
-//   participants: Array<{
-//     participant_id: string;
-//     participant_name: string;
-//     total_score: number;
-//     correct_answers: number;
-//     total_questions: number;
-//   }>;
-// };
-
-// export type { Props };
-
-// type Props = {
-//   roomId: string;
-//   quiz: {
-//     id?: string;
-//     title: string;
-//     type: 'classic' | 'jeopardy';
-//     settings?: { timeLimit?: number };
-//     questions: Question[];
-//   };
-//   currentParticipantId: string;
-//   allParticipants: RoomParticipant[];
-//   isHost: boolean;
-//   onBackToLobby?: () => void;
-// };
-
-// const QUESTION_DEFAULT_TIME = 20;
-
-// const normalize = (s: string) => (s ?? '').trim().toLowerCase();
-
-// const getCorrectAnswerText = (q: Question): string | null => {
-//   if (q.type === 'short_answer') {
-//     const canonical =
-//       q.correct_answer?.trim() ||
-//       q.answers?.find(a => a.is_correct)?.answer?.trim();
-//     return canonical || null;
-//   }
-//   const correct = q.answers?.find(a => a.is_correct);
-//   return correct?.answer ?? null;
-// };
-
-// const getUserAnswerText = (q: Question, a: CooperativeAnswer): string => {
-//   if (a.answer_id === 'NO_ANSWER') return '—';
-
-//   if (q.type === 'short_answer') {
-//     // in this app protocol we store typed value in answer_id
-//     return a.answer_id;
-//   }
-
-//   const chosen = q.answers?.find(opt => opt.id === a.answer_id);
-//   return chosen?.answer ?? '(unknown option)';
-// };
-
-// const isAnswerCorrect = (q: Question, answerIdOrText: string): boolean => {
-//   if (!answerIdOrText || answerIdOrText === 'NO_ANSWER') return false;
-
-//   if (q.type === 'short_answer') {
-//     const correct = getCorrectAnswerText(q);
-//     if (!correct) return false;
-//     return normalize(answerIdOrText) === normalize(correct);
-//   }
-
-//   const chosen = q.answers?.find(a => a.id === answerIdOrText);
-//   return !!chosen?.is_correct;
-// };
-
-// const getActivePlayers = (participants: RoomParticipant[]) =>
-//   participants.filter(p => p.is_active && !p.is_spectator && !p.is_host);
-
-// const groupQuestionsByCategory = (questions: Question[]): JeopardyCategoryMap => {
-//   const map: JeopardyCategoryMap = {};
-//   for (const q of questions) {
-//     const cat = (q.category || 'Uncategorized').trim();
-//     if (!map[cat]) map[cat] = [];
-//     map[cat].push(q);
-//   }
-//   // stable sort by order_index inside each category
-//   Object.keys(map).forEach(cat => {
-//     map[cat] = [...map[cat]].sort((a, b) => a.order_index - b.order_index);
-//   });
-//   return map;
-// };
-
-// export const CooperativeJeopardyPlayer: React.FC<Props> = ({
-//   roomId,
-//   quiz,
-//   currentParticipantId,
-//   allParticipants,
-//   isHost,
-//   onBackToLobby,
-// }) => {
-//   const wsRef = useRef<WebSocket | null>(null);
-
-//   // keep latest state for ws callbacks (avoid stale closure bugs)
-//   const participantsRef = useRef<RoomParticipant[]>([]);
-//   const categoryMapRef = useRef<JeopardyCategoryMap>({});
-//   const usedQuestionIdsRef = useRef<Set<string>>(new Set());
-//   const totalScoreRef = useRef<Map<string, number>>(new Map());
-//   const correctCountRef = useRef<Map<string, number>>(new Map());
-
-//   useEffect(() => {
-//     participantsRef.current = allParticipants;
-//   }, [allParticipants]);
-
-//   // game state
-//   const [gameStarted, setGameStarted] = useState(false);
-//   const [chooserId, setChooserId] = useState<string | null>(null);
-//   const [chooserName, setChooserName] = useState<string>('');
-//   const [showChooserBanner, setShowChooserBanner] = useState(true);
-
-//   const [categoryMap, setCategoryMap] = useState<JeopardyCategoryMap>({});
-//   const [usedQuestionIds, setUsedQuestionIds] = useState<Set<string>>(new Set());
-//   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-
-//   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
-//   const [questionStarted, setQuestionStarted] = useState(false);
-
-//   // answering
-//   const [selectedAnswerId, setSelectedAnswerId] = useState<string>(''); // for mc/tf
-//   const [shortAnswerText, setShortAnswerText] = useState<string>(''); // for short_answer
-//   const [participantAnswers, setParticipantAnswers] = useState<Map<string, CooperativeAnswer>>(new Map());
-//   const [waitingForAnswers, setWaitingForAnswers] = useState<Set<string>>(new Set());
-
-//   // timer
-//   const [timeRemaining, setTimeRemaining] = useState<number>(0);
-//   const [timerActive, setTimerActive] = useState<boolean>(false);
-//   const questionStartMsRef = useRef<number>(0);
-
-//   // results
-//   const [showQuestionResults, setShowQuestionResults] = useState(false);
-//   const [questionResults, setQuestionResults] = useState<QuestionResultsPayload | null>(null);
-
-//   // final
-//   const [showFinal, setShowFinal] = useState(false);
-//   const [finalPayload, setFinalPayload] = useState<FinalResultsPayload | null>(null);
-
-//   const timeLimit = useMemo(() => {
-//     return (quiz.settings?.timeLimit as number | undefined) ?? QUESTION_DEFAULT_TIME;
-//   }, [quiz.settings?.timeLimit]);
-
-//   // build initial category map from quiz questions (client-side)
-//   useEffect(() => {
-//     const map = groupQuestionsByCategory(quiz.questions || []);
-//     setCategoryMap(map);
-//     categoryMapRef.current = map;
-//   }, [quiz.questions]);
-
-//   useEffect(() => {
-//     categoryMapRef.current = categoryMap;
-//   }, [categoryMap]);
-
-//   useEffect(() => {
-//     usedQuestionIdsRef.current = usedQuestionIds;
-//   }, [usedQuestionIds]);
-
-//   // connect ws
-//   useEffect(() => {
-//     const ws = api.connectToRoomWebSocket(roomId);
-//     wsRef.current = ws;
-
-//     const onMessage = (event: MessageEvent) => {
-//       let payload: any;
-//       try {
-//         payload = JSON.parse(event.data);
-//       } catch {
-//         return;
-//       }
-//       const type = payload?.type;
-//       const data = payload?.data ?? {};
-
-//       switch (type) {
-//         case 'room_state': {
-//           // ignore here; parent usually manages allParticipants
-//           break;
-//         }
-
-//         case 'cooperative_jeopardy_start': {
-//           // everyone receives quiz_data + categories map (optional)
-//           setGameStarted(true);
-//           setShowFinal(false);
-//           setFinalPayload(null);
-
-//           const incomingCategories = data.categories as JeopardyCategoryMap | undefined;
-//           if (incomingCategories && typeof incomingCategories === 'object') {
-//             // trust server categories map if provided
-//             setCategoryMap(incomingCategories);
-//             categoryMapRef.current = incomingCategories;
-//           } else {
-//             // fallback to local quiz.questions
-//             const map = groupQuestionsByCategory(quiz.questions || []);
-//             setCategoryMap(map);
-//             categoryMapRef.current = map;
-//           }
-
-//           // reset
-//           setUsedQuestionIds(new Set());
-//           usedQuestionIdsRef.current = new Set();
-//           setSelectedCategory(null);
-//           setCurrentQuestion(null);
-//           setQuestionStarted(false);
-//           setParticipantAnswers(new Map());
-//           setWaitingForAnswers(new Set());
-//           setShowQuestionResults(false);
-//           setQuestionResults(null);
-
-//           // reset scores
-//           totalScoreRef.current = new Map();
-//           correctCountRef.current = new Map();
-
-//           break;
-//         }
-
-//         case 'cooperative_jeopardy_chooser_selected': {
-//           setChooserId(data.chooser_id ?? null);
-//           setChooserName(data.chooser_name ?? '');
-//           setShowChooserBanner(true);
-//           // after chooser selected, show the board
-//           setSelectedCategory(null);
-//           setCurrentQuestion(null);
-//           setQuestionStarted(false);
-//           setShowQuestionResults(false);
-//           setQuestionResults(null);
-//           break;
-//         }
-
-//         case 'cooperative_jeopardy_category_selected': {
-//           const q = data.question as Question | undefined;
-//           const cat = data.category_name as string | undefined;
-
-//           if (!q || !cat) return;
-
-//           setSelectedCategory(cat);
-//           setCurrentQuestion(q);
-
-//           // mark used now (board updates for everyone)
-//           if (q.id) {
-//             setUsedQuestionIds(prev => {
-//               const next = new Set(prev);
-//               next.add(q.id!);
-//               return next;
-//             });
-//           }
-
-//           // question isn’t “started” until we get cooperative_jeopardy_question_started
-//           setQuestionStarted(false);
-//           setShowQuestionResults(false);
-//           setQuestionResults(null);
-
-//           // clear any previous answers
-//           setParticipantAnswers(new Map());
-//           setWaitingForAnswers(new Set());
-//           setSelectedAnswerId('');
-//           setShortAnswerText('');
-//           setTimerActive(false);
-//           setTimeRemaining(0);
-//           break;
-//         }
-
-//         case 'cooperative_jeopardy_question_started': {
-//           const q = data.question as Question | undefined;
-//           const tl = Number(data.time_limit);
-
-//           if (q) setCurrentQuestion(q);
-
-//           // initialize answering state for everyone
-//           const active = getActivePlayers(participantsRef.current);
-//           const waiting = new Set(active.map(p => p.id));
-
-//           setParticipantAnswers(new Map());
-//           setWaitingForAnswers(waiting);
-//           setSelectedAnswerId('');
-//           setShortAnswerText('');
-
-//           setQuestionStarted(true);
-//           setShowQuestionResults(false);
-//           setQuestionResults(null);
-
-//           const resolvedLimit = Number.isFinite(tl) ? tl : timeLimit;
-//           questionStartMsRef.current = Date.now();
-//           setTimeRemaining(resolvedLimit);
-//           setTimerActive(true);
-//           break;
-//         }
-
-//         case 'cooperative_jeopardy_answer_submitted': {
-//           const participant_id = data.participant_id as string;
-//           const participant_name = data.participant_name as string;
-//           const question_id = data.question_id as string;
-//           const answer_id = data.answer_id as string;
-//           const time_taken = Number(data.time_taken) || Number(data.time_taken_ms) || 0;
-
-//           if (!participant_id) return;
-
-//           setParticipantAnswers(prev => {
-//             const next = new Map(prev);
-//             // is_correct will be recomputed by host for results;
-//             // for UI "answered" status we don't need correctness here.
-//             next.set(participant_id, {
-//               participant_id,
-//               participant_name: participant_name || 'Player',
-//               question_id,
-//               answer_id,
-//               is_correct: false,
-//               time_taken,
-//             });
-//             return next;
-//           });
-
-//           setWaitingForAnswers(prev => {
-//             const next = new Set(prev);
-//             next.delete(participant_id);
-//             return next;
-//           });
-
-//           break;
-//         }
-
-//         case 'cooperative_jeopardy_question_results': {
-//           setTimerActive(false);
-//           setQuestionStarted(false);
-//           setShowQuestionResults(true);
-
-//           const results = {
-//             question_id: data.question_id,
-//             all_answers: data.all_answers ?? [],
-//             ratings: data.ratings ?? [],
-//           } as QuestionResultsPayload;
-
-//           setQuestionResults(results);
-
-//           // update local score map so final ranking works for all clients
-//           const nextScore = new Map(totalScoreRef.current);
-//           for (const r of results.ratings) {
-//             nextScore.set(r.participant_id, r.total_score);
-//           }
-//           totalScoreRef.current = nextScore;
-
-//           // also track correct counts
-//           const nextCorrect = new Map(correctCountRef.current);
-//           for (const ans of results.all_answers) {
-//             if (ans.is_correct) {
-//               nextCorrect.set(ans.participant_id, (nextCorrect.get(ans.participant_id) ?? 0) + 1);
-//             }
-//           }
-//           correctCountRef.current = nextCorrect;
-
-//           break;
-//         }
-
-//         case 'cooperative_jeopardy_next_chooser': {
-//           // server forwards this; in our host-authoritative approach,
-//           // host broadcasts chooser selection separately with cooperative_jeopardy_chooser_selected
-//           // so we can ignore or just keep as “info”.
-//           break;
-//         }
-
-//         case 'cooperative_jeopardy_quiz_end': {
-//           setTimerActive(false);
-//           setQuestionStarted(false);
-//           setShowQuestionResults(false);
-//           setShowFinal(true);
-
-//           const fp = {
-//             participants: data.participants ?? [],
-//           } as FinalResultsPayload;
-
-//           setFinalPayload(fp);
-//           break;
-//         }
-
-//         default:
-//           break;
-//       }
-//     };
-
-//     ws.addEventListener('message', onMessage);
-
-//     return () => {
-//       ws.removeEventListener('message', onMessage);
-//       // don't force-close, api caches WS; parent may reuse
-//     };
-//   }, [roomId, quiz.questions, timeLimit]);
-
-//   // timer tick
-//   useEffect(() => {
-//     if (!timerActive) return;
-
-//     const t = setInterval(() => {
-//       setTimeRemaining(prev => {
-//         if (prev <= 1) {
-//           clearInterval(t);
-//           setTimerActive(false);
-
-//           // host finalizes on time
-//           if (isHost) {
-//             void finalizeQuestionBecauseTimeExpired();
-//           }
-//           return 0;
-//         }
-//         return prev - 1;
-//       });
-//     }, 1000);
-
-//     return () => clearInterval(t);
-//   }, [timerActive, isHost]);
-
-//   // host: when all answered, finalize
-//   useEffect(() => {
-//     if (!isHost) return;
-//     if (!questionStarted) return;
-//     if (!currentQuestion?.id) return;
-
-//     if (waitingForAnswers.size === 0) {
-//       void finalizeQuestionBecauseAllAnswered();
-//     }
-//   }, [waitingForAnswers, isHost, questionStarted, currentQuestion?.id]);
-
-//   const startGame = async () => {
-//     if (!isHost || !wsRef.current) return;
-
-//     // categories map for server (it stores it; can also broadcast to others)
-//     const categories = groupQuestionsByCategory(quiz.questions || []);
-
-//     await api.sendCooperativeJeopardyStart(wsRef.current, roomId, {
-//       quiz_data: quiz,
-//       categories,
-//     });
-//   };
-
-//   const isChooser = chooserId === currentParticipantId;
-
-//   const remainingQuestionsCount = useMemo(() => {
-//     const map = categoryMap;
-//     let total = 0;
-//     Object.values(map).forEach(list => {
-//       list.forEach(q => {
-//         if (q.id && !usedQuestionIds.has(q.id)) total += 1;
-//       });
-//     });
-//     return total;
-//   }, [categoryMap, usedQuestionIds]);
-
-//   const pickFirstUnusedQuestionInCategory = (category: string): Question | null => {
-//     const list = categoryMapRef.current[category] || [];
-//     for (const q of list) {
-//       if (q.id && !usedQuestionIdsRef.current.has(q.id)) return q;
-//       // if q.id missing (shouldn't), treat as selectable once:
-//       if (!q.id) return q;
-//     }
-//     return null;
-//   };
-
-//   const handleSelectCategory = async (category: string) => {
-//     if (!wsRef.current) return;
-//     if (!isChooser) return;
-//     if (!category) return;
-
-//     const q = pickFirstUnusedQuestionInCategory(category);
-//     if (!q) return;
-
-//     // broadcast category selection to everyone
-//     await api.sendCooperativeJeopardyCategorySelected(wsRef.current, roomId, {
-//       category_name: category,
-//       question: q,
-//       selected_by: currentParticipantId,
-//     });
-
-//     // host starts question (timer)
-//     if (isHost) {
-//       await api.sendCooperativeJeopardyQuestionStarted(wsRef.current, roomId, {
-//         question: q,
-//         time_limit: timeLimit,
-//       });
-//     }
-//   };
-
-//   const submitAnswer = async (answer_id: string) => {
-//     if (!wsRef.current || !currentQuestion?.id) return;
-//     if (!questionStarted) return;
-
-//     // prevent multiple submits by same user
-//     if (participantAnswers.has(currentParticipantId)) return;
-
-//     const timeTakenMs = Math.max(0, Date.now() - questionStartMsRef.current);
-
-//     await api.sendCooperativeJeopardyAnswerSubmit(wsRef.current, roomId, {
-//       question_id: currentQuestion.id,
-//       answer_id,
-//       participant_id: currentParticipantId,
-//       time_taken_ms: timeTakenMs,
-//     });
-//   };
-
-//   const handleSkip = async () => {
-//     await submitAnswer('NO_ANSWER');
-//   };
-
-//   const finalizeQuestionBecauseAllAnswered = async () => {
-//     await finalizeQuestion('all_answered');
-//   };
-
-//   const finalizeQuestionBecauseTimeExpired = async () => {
-//     await finalizeQuestion('time_expired');
-//   };
-
-//   const finalizeQuestion = async (_reason: 'all_answered' | 'time_expired') => {
-//     if (!isHost || !wsRef.current || !currentQuestion?.id) return;
-
-//     // compute results for all active players: answered, skipped, or missing -> NO_ANSWER
-//     const active = getActivePlayers(participantsRef.current);
-
-//     const answers: CooperativeAnswer[] = active.map(p => {
-//       const existing = participantAnswers.get(p.id);
-//       const answer_id = existing?.answer_id ?? 'NO_ANSWER';
-//       const time_taken = existing?.time_taken ?? 0;
-
-//       return {
-//         participant_id: p.id,
-//         participant_name: p.guest_name,
-//         question_id: currentQuestion.id!,
-//         answer_id,
-//         is_correct: isAnswerCorrect(currentQuestion, answer_id),
-//         time_taken,
-//       };
-//     });
-
-//     // scoring:
-//     // correct => +points, wrong => -points, NO_ANSWER => 0
-//     const deltaPoints = currentQuestion.points ?? 0;
-
-//     const nextTotal = new Map(totalScoreRef.current);
-//     for (const a of answers) {
-//       const prev = nextTotal.get(a.participant_id) ?? 0;
-//       let change = 0;
-//       if (a.answer_id === 'NO_ANSWER') change = 0;
-//       else change = a.is_correct ? deltaPoints : -deltaPoints;
-//       nextTotal.set(a.participant_id, prev + change);
-//     }
-
-//     totalScoreRef.current = nextTotal;
-
-//     const ratings: RatingRow[] = active.map(p => {
-//       const prevTotal = (totalScoreRef.current.get(p.id) ?? 0);
-//       // We need rating_change for this question; recompute from answers for each p
-//       const a = answers.find(x => x.participant_id === p.id)!;
-//       const change =
-//         a.answer_id === 'NO_ANSWER' ? 0 : a.is_correct ? deltaPoints : -deltaPoints;
-
-//       return {
-//         participant_id: p.id,
-//         participant_name: p.guest_name,
-//         total_score: prevTotal, // already includes change
-//         rating_change: change,
-//       };
-//     });
-
-//     // broadcast results
-//     await api.sendCooperativeJeopardyQuestionResults(wsRef.current, roomId, {
-//       question_id: currentQuestion.id!,
-//       all_answers: answers,
-//       ratings,
-//     });
-
-//     // determine winners (correct)
-//     const winners = answers
-//       .filter(a => a.is_correct)
-//       .map(a => ({ participant_id: a.participant_id, participant_name: a.participant_name }));
-
-//     // broadcast “next chooser” info (optional)
-//     await api.sendCooperativeJeopardyNextChooser(wsRef.current, roomId, { winners });
-
-//     // pick next chooser randomly from winners, else from all active
-//     const pool = winners.length > 0 ? winners : active.map(p => ({
-//       participant_id: p.id,
-//       participant_name: p.guest_name,
-//     }));
-//     const next = pool[Math.floor(Math.random() * pool.length)];
-
-//     // broadcast chooser selection to all (this is what clients actually use)
-//     await api.sendCooperativeJeopardyChooserSelected(wsRef.current, roomId, {
-//       chooser_id: next.participant_id,
-//       chooser_name: next.participant_name,
-//       is_initial: false,
-//     });
-
-//     // If the board is empty now => end game
-//     const stillRemaining = countRemainingQuestions();
-//     if (stillRemaining === 0) {
-//       await endGame();
-//     }
-//   };
-
-//   const countRemainingQuestions = () => {
-//     const map = categoryMapRef.current;
-//     const used = usedQuestionIdsRef.current;
-//     let total = 0;
-//     for (const list of Object.values(map)) {
-//       for (const q of list) {
-//         if (q.id && !used.has(q.id)) total += 1;
-//         if (!q.id) total += 1;
-//       }
-//     }
-//     return total;
-//   };
-
-//   const endGame = async () => {
-//     if (!isHost || !wsRef.current) return;
-
-//     const active = getActivePlayers(participantsRef.current);
-
-//     // total_questions = number of used questions (with id)
-//     const totalQ = usedQuestionIdsRef.current.size;
-
-//     const participants = active.map(p => {
-//       const total_score = totalScoreRef.current.get(p.id) ?? 0;
-//       const correct_answers = correctCountRef.current.get(p.id) ?? 0;
-
-//       return {
-//         participant_id: p.id,
-//         participant_name: p.guest_name,
-//         total_score,
-//         correct_answers,
-//         total_questions: totalQ,
-//       };
-//     });
-
-//     await api.sendCooperativeJeopardyQuizEnd(wsRef.current, roomId, { participants });
-//   };
-
-//   const handleBackToLobby = () => {
-//     if (onBackToLobby) onBackToLobby();
-//   };
-
-//   // ---------- UI RENDERING ----------
-
-//   // Final screen
-//   if (showFinal) {
-//     // Prefer payload from server; but ensure names/avatars show via allParticipants
-//     const rankingRows = getActivePlayers(allParticipants)
-//       .map(p => {
-//         const score =
-//           finalPayload?.participants?.find(x => x.participant_id === p.id)?.total_score ??
-//           totalScoreRef.current.get(p.id) ??
-//           0;
-
-//         return {
-//           participant_id: p.id,
-//           participant_name: p.guest_name,
-//           total_score: score,
-//           guest_avatar: p.guest_avatar,
-//         };
-//       })
-//       .sort((a, b) => b.total_score - a.total_score);
-
-//     return (
-//       <div className="cooperative-jeopardy">
-//         <motion.div className="final-card" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-//           <h1 className="title">Game Complete</h1>
-
-//           <div className="final-rankings">
-//             <h2>Final Rankings</h2>
-
-//             {rankingRows.map((row, idx) => {
-//               const avatarUrl = row.guest_avatar ? resolveMediaUrl(row.guest_avatar) : undefined;
-//               return (
-//                 <div key={row.participant_id} className="ranking-item">
-//                   <div className="rank">#{idx + 1}</div>
-
-//                   <div className="ranking-user">
-//                     {avatarUrl ? (
-//                       <img className="ranking-avatar" src={avatarUrl} alt={row.participant_name} />
-//                     ) : (
-//                       <div className="ranking-avatar placeholder">
-//                         {row.participant_name.charAt(0).toUpperCase()}
-//                       </div>
-//                     )}
-//                     <div className="ranking-name">{row.participant_name}</div>
-//                   </div>
-
-//                   <div className="ranking-score">{row.total_score} $</div>
-//                 </div>
-//               );
-//             })}
-//           </div>
-
-//           <button className="back-btn" onClick={handleBackToLobby}>
-//             Back to Lobby
-//           </button>
-//         </motion.div>
-//       </div>
-//     );
-//   }
-
-//   // Question results screen
-//   if (showQuestionResults && questionResults && currentQuestion) {
-//     const active = getActivePlayers(allParticipants);
-
-//     // Ensure everyone appears (even if they never submitted)
-//     const answersById = new Map(questionResults.all_answers.map(a => [a.participant_id, a]));
-//     const normalizedAnswers: CooperativeAnswer[] = active.map(p => {
-//       const existing = answersById.get(p.id);
-//       return (
-//         existing ?? {
-//           participant_id: p.id,
-//           participant_name: p.guest_name,
-//           question_id: currentQuestion.id || '',
-//           answer_id: 'NO_ANSWER',
-//           is_correct: false,
-//           time_taken: 0,
-//         }
-//       );
-//     });
-
-//     const correctAnswerText = getCorrectAnswerText(currentQuestion);
-
-//     return (
-//       <div className="cooperative-jeopardy">
-//         <motion.div className="results-card" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-//           <h2 className="title">Results</h2>
-
-//           {correctAnswerText && (
-//             <div className="correct-answer-banner">
-//               <span className="label">Correct:</span>
-//               <span className="value">{correctAnswerText}</span>
-//             </div>
-//           )}
-
-//           <div className="results-list">
-//             {normalizedAnswers.map(a => {
-//               const p = allParticipants.find(x => x.id === a.participant_id);
-//               const name = p?.guest_name || a.participant_name;
-//               const avatarUrl = p?.guest_avatar ? resolveMediaUrl(p.guest_avatar) : undefined;
-
-//               const rating = questionResults.ratings.find(r => r.participant_id === a.participant_id);
-//               const change = rating?.rating_change ?? 0;
-
-//               const isNoAnswer = a.answer_id === 'NO_ANSWER';
-//               const userAnswerText = getUserAnswerText(currentQuestion, a);
-
-//               return (
-//                 <div
-//                   key={a.participant_id}
-//                   className={`result-item ${a.is_correct ? 'correct' : isNoAnswer ? 'no-answer' : 'incorrect'}`}
-//                 >
-//                   <div className="result-user">
-//                     {avatarUrl ? (
-//                       <img className="avatar" src={avatarUrl} alt={name} />
-//                     ) : (
-//                       <div className="avatar placeholder">{name.charAt(0).toUpperCase()}</div>
-//                     )}
-//                     <div className="meta">
-//                       <div className="row">
-//                         <div className="name">
-//                           {name}
-//                           {a.participant_id === currentParticipantId && <span className="you-badge">You</span>}
-//                         </div>
-//                         <div className={`delta ${change > 0 ? 'plus' : change < 0 ? 'minus' : ''}`}>
-//                           {change > 0 ? '+' : ''}
-//                           {change} $
-//                         </div>
-//                       </div>
-
-//                       <div className="row secondary">
-//                         <div className="status">
-//                           {isNoAnswer ? 'Skipped' : a.is_correct ? 'Correct' : 'Wrong'}
-//                         </div>
-//                         <div className="answer">
-//                           <span className="label">Answered:</span> <span className="value">{userAnswerText}</span>
-//                         </div>
-//                       </div>
-//                     </div>
-//                   </div>
-//                 </div>
-//               );
-//             })}
-//           </div>
-
-//           <div className="hint">
-//             Next chooser will be selected automatically from the winners.
-//           </div>
-//         </motion.div>
-//       </div>
-//     );
-//   }
-
-//   // Question screen
-//   if (currentQuestion && questionStarted) {
-//     const q = currentQuestion;
-//     const imgUrl = q.image_url ? resolveMediaUrl(q.image_url) : undefined;
-//     const audioUrl = q.audio_url ? resolveMediaUrl(q.audio_url) : undefined;
-
-//     const alreadyAnswered = participantAnswers.has(currentParticipantId);
-
-//     return (
-//       <div className="cooperative-jeopardy">
-//         <motion.div className="question-card" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-//           <div className="topbar">
-//             <div className="chooser">
-//               Chooser: <b>{chooserName || '—'}</b>
-//             </div>
-//             <div className="timer">{timeRemaining}s</div>
-//           </div>
-
-//           <div className="question-header">
-//             <div className="category">{selectedCategory}</div>
-//             <div className="points">{q.points ?? 0} $</div>
-//           </div>
-
-//           <div className="question-text">{q.question}</div>
-
-//           {imgUrl && <img className="media-image" src={imgUrl} alt="question" />}
-//           {audioUrl && <audio className="media-audio" controls src={audioUrl} />}
-
-//           <div className="answer-area">
-//             {(q.type === 'multiple_choice' || q.type === 'true_false' || q.type === 'picture_choice') && (
-//               <div className="choices">
-//                 {(q.answers ?? []).map(opt => (
-//                   <button
-//                     key={opt.id}
-//                     className={`choice ${selectedAnswerId === opt.id ? 'selected' : ''}`}
-//                     disabled={alreadyAnswered}
-//                     onClick={() => setSelectedAnswerId(opt.id || '')}
-//                   >
-//                     {opt.image_url ? (
-//                       <div className="picture-choice">
-//                         <img src={resolveMediaUrl(opt.image_url)} alt={opt.answer} />
-//                         <div className="caption">{opt.answer}</div>
-//                       </div>
-//                     ) : (
-//                       opt.answer
-//                     )}
-//                   </button>
-//                 ))}
-//               </div>
-//             )}
-
-//             {q.type === 'short_answer' && (
-//               <input
-//                 className="short-input"
-//                 placeholder={alreadyAnswered ? 'Answer submitted' : 'Type your answer'}
-//                 value={shortAnswerText}
-//                 disabled={alreadyAnswered}
-//                 onChange={e => setShortAnswerText(e.target.value)}
-//               />
-//             )}
-
-//             <div className="action-row">
-//               <button
-//                 className="submit-btn"
-//                 disabled={alreadyAnswered || (q.type === 'short_answer' ? shortAnswerText.trim() === '' : selectedAnswerId === '')}
-//                 onClick={() => {
-//                   if (q.type === 'short_answer') void submitAnswer(shortAnswerText.trim());
-//                   else void submitAnswer(selectedAnswerId);
-//                 }}
-//               >
-//                 Submit
-//               </button>
-
-//               <button className="skip-btn" disabled={alreadyAnswered} onClick={() => void handleSkip()}>
-//                 Skip
-//               </button>
-//             </div>
-
-//             <div className="status-row">
-//               <div className="answered">
-//                 Answered: {participantAnswers.size} / {getActivePlayers(allParticipants).length}
-//               </div>
-//             </div>
-//           </div>
-//         </motion.div>
-//       </div>
-//     );
-//   }
-
-//   // Board screen (category table)
-//   if (gameStarted) {
-//     const categories = Object.keys(categoryMap);
-
-//     return (
-//       <div className="cooperative-jeopardy">
-//         <motion.div className="board-card" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-//           <div className="board-header">
-//             <div className="quiz-title">{quiz.title}</div>
-//             <div className="remaining">Remaining: {remainingQuestionsCount}</div>
-//           </div>
-
-//           {showChooserBanner && (
-//             <div className="chooser-banner">
-//               <div className="text">
-//                 Next chooser: <b>{chooserName || '—'}</b>
-//               </div>
-//               <div className="sub">
-//                 {isChooser ? 'It’s your turn to choose a category.' : 'Waiting for the chooser to pick a category.'}
-//               </div>
-//               <button className="dismiss" onClick={() => setShowChooserBanner(false)}>
-//                 OK
-//               </button>
-//             </div>
-//           )}
-
-//           <div className="board">
-//             {categories.length === 0 ? (
-//               <div className="empty">No categories</div>
-//             ) : (
-//               categories.map(cat => {
-//                 const unused = (categoryMap[cat] || []).filter(q => !q.id || !usedQuestionIds.has(q.id));
-//                 const disabled = !isChooser || unused.length === 0;
-
-//                 return (
-//                   <button
-//                     key={cat}
-//                     className={`category-tile ${disabled ? 'disabled' : ''}`}
-//                     disabled={disabled}
-//                     onClick={() => void handleSelectCategory(cat)}
-//                   >
-//                     <div className="cat-name">{cat}</div>
-//                     <div className="cat-meta">
-//                       {unused.length > 0 ? `${unused.length} left` : 'Done'}
-//                     </div>
-//                   </button>
-//                 );
-//               })
-//             )}
-//           </div>
-
-//           {isHost && (
-//             <div className="host-controls">
-//               <button className="start-btn" onClick={() => void startGame()}>
-//                 Restart Jeopardy (Host)
-//               </button>
-//               <button className="end-btn" onClick={() => void endGame()}>
-//                 End Game (Host)
-//               </button>
-//             </div>
-//           )}
-//         </motion.div>
-//       </div>
-//     );
-//   }
-
-//   // Pre-start screen
-//   return (
-//     <div className="cooperative-jeopardy">
-//       <motion.div className="prestart-card" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-//         <h1 className="title">{quiz.title}</h1>
-//         <div className="subtitle">Cooperative Jeopardy mode</div>
-
-//         {isHost ? (
-//           <button className="start-btn" onClick={() => void startGame()}>
-//             Start Game
-//           </button>
-//         ) : (
-//           <div className="waiting">
-//             Waiting for host to start…
-//           </div>
-//         )}
-
-//         <button className="back-btn" onClick={handleBackToLobby}>
-//           Back to Lobby
-//         </button>
-//       </motion.div>
-//     </div>
-//   );
-// };
+type LocationState = {
+  roomId: string;
+  quiz: Quiz;
+  isHost: boolean;
+  currentParticipantId: string | null;
+  participants: RoomParticipant[];
+};
+
+type JeopardyChooser = {
+  chooser_id: string;
+  chooser_name: string;
+  is_initial: boolean;
+};
+
+type RatingRow = {
+  participant_id: string;
+  participant_name: string;
+  total_score: number;
+  rating_change: number;
+};
+
+type AnswerRecord = {
+  participant_id: string;
+  participant_name: string;
+  participant_avatar?: string | null; // NEW: avatar in results rows
+  question_id: string;
+  answer_id: string; // MC: answer option id; short_answer: typed text; or "NO_ANSWER"
+  is_correct: boolean;
+  time_taken: number; // ms
+};
+
+type ResultsPayload = {
+  question_id: string;
+  all_answers: AnswerRecord[];
+  ratings: RatingRow[];
+};
+
+type FinalPayload = {
+  final_ratings: RatingRow[];
+};
+
+function safeJsonParse(raw: string): any | null {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function groupQuestionsByCategory(questions: Question[]): Map<string, Question[]> {
+  const map = new Map<string, Question[]>();
+  for (const q of questions) {
+    const cat = (((q as any).category as string) || 'Uncategorized') as string;
+    if (!map.has(cat)) map.set(cat, []);
+    map.get(cat)!.push(q);
+  }
+  return map;
+}
+
+function getActivePlayersExcludingHost(participants: RoomParticipant[]): RoomParticipant[] {
+  return (participants || []).filter(p => p.is_active && !p.is_spectator && !p.is_host);
+}
+
+function getQuestionByCategoryAndPoints(
+  questions: Question[],
+  category: string,
+  points: number
+): Question | undefined {
+  return questions.find(
+    q =>
+      (((q as any).category as string) || 'Uncategorized') === category &&
+      Number((q as any).points) === points
+  );
+}
+
+function getCanonicalShortAnswerText(question: any): string | null {
+  const fromField = (question?.correct_answer as string | undefined)?.trim();
+  if (fromField) return fromField;
+
+  const fromAnswers = (question?.answers || []).find((a: any) => a.is_correct)?.answer?.trim();
+  return fromAnswers || null;
+}
+
+function isQuestionCorrect(question: any, answerIdOrText: string): boolean {
+  if (!question) return false;
+  if (!answerIdOrText || answerIdOrText === 'NO_ANSWER') return false;
+
+  if (question.type === 'short_answer') {
+    const canonical = getCanonicalShortAnswerText(question)?.trim().toLowerCase();
+    const user = String(answerIdOrText).trim().toLowerCase();
+    return canonical ? user === canonical : false;
+  }
+
+  const answers = question.answers || [];
+  const found = answers.find((a: any) => a.id === answerIdOrText);
+  return !!found?.is_correct;
+}
+
+function findAnswerText(question: any, answerIdOrText: string): string {
+  if (!answerIdOrText) return '';
+  if (answerIdOrText === 'NO_ANSWER') return '—';
+
+  if (question?.type === 'short_answer') return String(answerIdOrText);
+
+  const a = (question?.answers || []).find((x: any) => x.id === answerIdOrText);
+  return a?.answer ?? '(unknown option)';
+}
+
+function pickRandom<T>(arr: T[]): T | null {
+  if (!arr || arr.length === 0) return null;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function buildPlayableCellIds(questions: Question[]): Set<string> {
+  const s = new Set<string>();
+  for (const q of questions) {
+    const cat = String((q as any).category || 'Uncategorized');
+    const pts = Number((q as any).points ?? 0);
+    if (!cat || !pts) continue;
+    s.add(`${cat}::${pts}`);
+  }
+  return s;
+}
+
+function countIntersection(a: Set<string>, b: Set<string>): number {
+  let c = 0;
+  a.forEach(x => {
+    if (b.has(x)) c++;
+  });
+  return c;
+}
+
+function getParticipantAvatar(
+  participants: RoomParticipant[],
+  rec: { participant_id: string; participant_avatar?: string | null }
+): string | null {
+  if (rec.participant_avatar) return rec.participant_avatar;
+  const p = participants.find(x => x.id === rec.participant_id);
+  return ((p as any)?.guest_avatar as string | undefined) ?? null;
+}
+
+export const CooperativeJeopardyPlayer: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const nav = useMemo(() => {
+    const s = (location.state || {}) as Partial<LocationState>;
+    return {
+      roomId: s.roomId ?? null,
+      quiz: (s.quiz ?? null) as Quiz | null,
+      isHost: !!s.isHost,
+      currentParticipantId: s.currentParticipantId ?? null,
+      participants: s.participants ?? [],
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const quiz = nav.quiz;
+
+  // WebSocket
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // Participants
+  const [participants, setParticipants] = useState<RoomParticipant[]>(nav.participants);
+  const participantsRef = useRef<RoomParticipant[]>(nav.participants);
+
+  useEffect(() => {
+    participantsRef.current = participants;
+  }, [participants]);
+
+  const [currentParticipantId, setCurrentParticipantId] = useState<string | null>(
+    nav.currentParticipantId
+  );
+
+  const [hostParticipantId, setHostParticipantId] = useState<string | null>(null);
+  useEffect(() => {
+    const hostP = participants.find(p => p.is_host);
+    setHostParticipantId(hostP?.id ?? null);
+  }, [participants]);
+
+  const activePlayers = useMemo(() => getActivePlayersExcludingHost(participants), [participants]);
+
+  // Load questions
+  const [loadingQuiz, setLoadingQuiz] = useState<boolean>(false);
+  const [loadedQuestions, setLoadedQuestions] = useState<Question[]>(
+    () => (((quiz as any)?.questions ?? []) as Question[])
+  );
+
+  useEffect(() => {
+    const run = async () => {
+      if (!quiz?.id) return;
+
+      const embedded = ((quiz as any).questions ?? []) as any[];
+      if (Array.isArray(embedded) && embedded.length > 0) {
+        setLoadedQuestions(embedded);
+        return;
+      }
+
+      try {
+        setLoadingQuiz(true);
+        const qs = await api.getQuestionsByQuiz(quiz.id);
+
+        const withAnswers = await Promise.all(
+          qs.map(async (q: any) => {
+            const answers = await api.getAnswersByQuestion(q.id!);
+            return { ...q, answers };
+          })
+        );
+
+        setLoadedQuestions(withAnswers);
+      } catch (e) {
+        console.error('Failed to load quiz questions:', e);
+        setLoadedQuestions([]);
+      } finally {
+        setLoadingQuiz(false);
+      }
+    };
+
+    void run();
+  }, [quiz?.id]);
+
+  const questions: Question[] = useMemo(() => loadedQuestions, [loadedQuestions]);
+
+  // Board
+  const categoriesMap = useMemo(() => groupQuestionsByCategory(questions), [questions]);
+  const categoryNames = useMemo(() => Array.from(categoriesMap.keys()), [categoriesMap]);
+  const pointValues = useMemo(() => [100, 200, 300, 400, 500], []);
+  const gridCols = `repeat(${Math.max(categoryNames.length, 1)}, minmax(140px, 1fr))`;
+  const makeCellId = (category: string, points: number) => `${category}::${points}`;
+
+  // Stages
+  const [stage, setStage] = useState<'BOARD' | 'QUESTION' | 'RESULTS' | 'FINAL'>('BOARD');
+
+  // Chooser
+  const [chooser, setChooser] = useState<JeopardyChooser | null>(null);
+
+  // Revealed cells
+  const [revealedCells, setRevealedCells] = useState<Set<string>>(new Set());
+  const lastPickedCellRef = useRef<{ category: string; points: number } | null>(null);
+  const [hasFirstQuestionStarted, setHasFirstQuestionStarted] = useState<boolean>(false);
+
+  // Current question
+  const [currentQuestion, setCurrentQuestion] = useState<any | null>(null);
+  const isShortAnswer = currentQuestion?.type === 'short_answer';
+
+  // Answer inputs
+  const [selectedAnswerId, setSelectedAnswerId] = useState<string | null>(null);
+  const [shortAnswerDraft, setShortAnswerDraft] = useState<string>('');
+  const [mySubmitted, setMySubmitted] = useState(false);
+
+  // Timer
+  const [timeLimitSec, setTimeLimitSec] = useState<number>(20);
+  const [timeLeftSec, setTimeLeftSec] = useState<number>(0);
+  const [questionOpen, setQuestionOpen] = useState(false);
+  const questionStartMsRef = useRef<number>(0);
+
+  // Per-question answers
+  const [participantAnswers, setParticipantAnswers] = useState<
+    Map<string, { answer_id: string; time_taken: number }>
+  >(new Map());
+  const participantAnswersRef = useRef(participantAnswers);
+
+  useEffect(() => {
+    participantAnswersRef.current = participantAnswers;
+  }, [participantAnswers]);
+
+  // Results + final
+  const [lastResults, setLastResults] = useState<ResultsPayload | null>(null);
+  const [finalRatings, setFinalRatings] = useState<RatingRow[] | null>(null);
+
+  // Totals
+  const totalsRef = useRef<Map<string, number>>(new Map());
+  const [scoreboard, setScoreboard] = useState<RatingRow[]>([]);
+
+  // Playable cells (only cells that actually have a question)
+  const playableCellIds = useMemo(() => buildPlayableCellIds(questions), [questions]);
+  const playableCellIdsRef = useRef(playableCellIds);
+  useEffect(() => {
+    playableCellIdsRef.current = playableCellIds;
+  }, [playableCellIds]);
+
+  const playableTotal = playableCellIds.size;
+  const playableDone = useMemo(
+    () => countIntersection(revealedCells, playableCellIds),
+    [revealedCells, playableCellIds]
+  );
+
+  // Participants status (Classic-like)
+  const activeParticipants = useMemo(() => activePlayers, [activePlayers]);
+
+  const waitingForAnswers = useMemo(() => {
+    const waiting = new Set<string>();
+    for (const p of activeParticipants) {
+      if (!participantAnswers.has(p.id)) waiting.add(p.id);
+    }
+    return waiting;
+  }, [activeParticipants, participantAnswers]);
+
+  const answeredCount = useMemo(
+    () => activeParticipants.length - waitingForAnswers.size,
+    [activeParticipants, waitingForAnswers]
+  );
+  const totalParticipants = useMemo(() => activeParticipants.length, [activeParticipants]);
+
+  const iAmChooser = useMemo(() => {
+    if (!chooser) return false;
+    if (nav.isHost) return !!hostParticipantId && chooser.chooser_id === hostParticipantId;
+    return !!currentParticipantId && chooser.chooser_id === currentParticipantId;
+  }, [chooser, nav.isHost, hostParticipantId, currentParticipantId]);
+
+  const canPickCell = useMemo(() => {
+    if (stage !== 'BOARD') return false;
+    if (questionOpen) return false;
+
+    // first question: host picks (only once)
+    if (!chooser) return nav.isHost && !hasFirstQuestionStarted;
+
+    // after chooser assigned: chooser picks
+    return iAmChooser;
+  }, [stage, questionOpen, chooser, nav.isHost, iAmChooser, hasFirstQuestionStarted]);
+
+  const computeFinalRatings = useCallback((): RatingRow[] => {
+    const active = getActivePlayersExcludingHost(participantsRef.current);
+    return active
+      .map(p => ({
+        participant_id: p.id,
+        participant_name: p.guest_name,
+        total_score: totalsRef.current.get(p.id) ?? 0,
+        rating_change: 0,
+      }))
+      .sort((a, b) => b.total_score - a.total_score);
+  }, []);
+
+  // Timer ticking
+  useEffect(() => {
+    if (!questionOpen) return;
+
+    setTimeLeftSec(timeLimitSec);
+    const interval = window.setInterval(() => setTimeLeftSec(prev => prev - 1), 1000);
+    return () => window.clearInterval(interval);
+  }, [questionOpen, timeLimitSec]);
+
+  // Host: finalize -> results (accept snapshot to avoid last-answer race)
+  const hostFinalizeToResults = useCallback(
+    async (answersSnapshot?: Map<string, { answer_id: string; time_taken: number }>) => {
+      if (!nav.isHost || !wsRef.current || !nav.roomId || !currentQuestion?.id) return;
+
+      const active = getActivePlayersExcludingHost(participantsRef.current);
+      const answersMap = answersSnapshot ?? participantAnswersRef.current;
+
+      const all_answers: AnswerRecord[] = active.map(p => {
+        const existing = answersMap.get(p.id);
+        const answer_id = existing?.answer_id ?? 'NO_ANSWER';
+        const time_taken = existing?.time_taken ?? 0;
+
+        return {
+          participant_id: p.id,
+          participant_name: p.guest_name,
+          participant_avatar: (p as any).guest_avatar ?? null,
+          question_id: currentQuestion.id!,
+          answer_id,
+          is_correct: isQuestionCorrect(currentQuestion, answer_id),
+          time_taken,
+        };
+      });
+
+      const pts = Number((currentQuestion as any).points ?? 0);
+
+      const nextTotals = new Map(totalsRef.current);
+      const ratings: RatingRow[] = active.map(p => {
+        const a = all_answers.find(x => x.participant_id === p.id)!;
+        const change = a.answer_id === 'NO_ANSWER' ? 0 : a.is_correct ? +pts : -pts;
+        const newTotal = (nextTotals.get(p.id) ?? 0) + change;
+        nextTotals.set(p.id, newTotal);
+
+        return {
+          participant_id: p.id,
+          participant_name: p.guest_name,
+          total_score: newTotal,
+          rating_change: change,
+        };
+      });
+
+      totalsRef.current = nextTotals;
+
+      await api.sendCooperativeJeopardyQuestionResults(wsRef.current, nav.roomId, {
+        question_id: currentQuestion.id!,
+        all_answers,
+        ratings,
+      });
+
+      setLastResults({ question_id: currentQuestion.id!, all_answers, ratings });
+      setScoreboard(ratings);
+      setQuestionOpen(false);
+      setStage('RESULTS');
+    },
+    [nav.isHost, nav.roomId, currentQuestion]
+  );
+
+  // Time expiry -> host finalize
+  useEffect(() => {
+    if (!questionOpen) return;
+    if (timeLeftSec > 0) return;
+    if (nav.isHost) void hostFinalizeToResults();
+  }, [timeLeftSec, questionOpen, nav.isHost, hostFinalizeToResults]);
+
+  // Host: Continue -> reveal cell + pick next chooser OR end game (PREFERENCE: end on Continue)
+  const hostContinueAfterResults = useCallback(async () => {
+    if (!nav.isHost || !wsRef.current || !nav.roomId || !lastResults) return;
+
+    const picked = lastPickedCellRef.current;
+    const cat = picked?.category ?? ((currentQuestion as any)?.category || 'Uncategorized');
+    const pts = picked?.points ?? Number((currentQuestion as any)?.points ?? 0);
+
+    const justPlayedId = cat && pts ? makeCellId(cat, pts) : null;
+
+    // Deterministic next revealed set (do not rely on async setState timing)
+    const nextRevealed = new Set(revealedCells);
+    if (justPlayedId) nextRevealed.add(justPlayedId);
+
+    // Commit reveal in UI
+    if (justPlayedId) setRevealedCells(nextRevealed);
+
+    // Finished?
+    const playableIds = playableCellIdsRef.current;
+    const totalPlayable = playableIds.size;
+    const donePlayable = countIntersection(nextRevealed, playableIds);
+    const isFinished = totalPlayable > 0 && donePlayable >= totalPlayable;
+
+    if (isFinished) {
+      const finals = computeFinalRatings();
+
+      // Broadcast end (works even if server doesn't implement an API helper)
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'cooperative_jeopardy_quiz_end',
+          data: { final_ratings: finals } as FinalPayload,
+          timestamp: new Date().toISOString(),
+        })
+      );
+
+      setFinalRatings(finals);
+      setStage('FINAL');
+      return;
+    }
+
+    // Not finished -> choose next chooser
+    const active = getActivePlayersExcludingHost(participantsRef.current);
+
+    const winners = lastResults.all_answers
+      .filter(a => a.is_correct)
+      .map(a => ({ id: a.participant_id, name: a.participant_name }));
+
+    const pool =
+      winners.length > 0
+        ? winners
+        : active.map(p => ({ id: p.id, name: p.guest_name }));
+
+    const next = pickRandom(pool);
+
+    if (next) {
+      await api.sendCooperativeJeopardyChooserSelected(wsRef.current, nav.roomId, {
+        chooser_id: next.id,
+        chooser_name: next.name,
+        is_initial: false,
+        revealed_cell: { category: cat, points: pts },
+      } as any);
+    } else {
+      setStage('BOARD');
+    }
+
+    // reset for next question pick
+    setParticipantAnswers(new Map());
+    participantAnswersRef.current = new Map();
+    setSelectedAnswerId(null);
+    setShortAnswerDraft('');
+    setMySubmitted(false);
+    setCurrentQuestion(null);
+    setQuestionOpen(false);
+    setLastResults(null);
+    setStage('BOARD');
+  }, [
+    nav.isHost,
+    nav.roomId,
+    lastResults,
+    currentQuestion,
+    revealedCells,
+    computeFinalRatings,
+  ]);
+
+  // Host: start game
+  const startCategories = useMemo(() => categoryNames, [categoryNames]);
+  const hostStartGame = useCallback(async () => {
+    if (!nav.isHost || !wsRef.current || !nav.roomId || !quiz) return;
+
+    await api.sendCooperativeJeopardyStart(wsRef.current, nav.roomId, {
+      quiz_data: { quiz_id: quiz.id },
+      categories: startCategories,
+    });
+  }, [nav.isHost, nav.roomId, quiz, startCategories]);
+
+  // Board: click cell -> start question
+  const handleCellClick = useCallback(
+    async (category: string, points: number) => {
+      if (!wsRef.current || !nav.roomId) return;
+      if (!canPickCell) return;
+      if (stage !== 'BOARD') return;
+
+      const id = makeCellId(category, points);
+      if (revealedCells.has(id)) return;
+
+      const q = getQuestionByCategoryAndPoints(questions, category, points);
+      if (!q) return;
+
+      lastPickedCellRef.current = { category, points };
+
+      await api.sendCooperativeJeopardyQuestionStarted(wsRef.current, nav.roomId, {
+        question: q,
+        time_limit: timeLimitSec,
+        cell: { category, points },
+      } as any);
+    },
+    [nav.roomId, canPickCell, stage, revealedCells, questions, timeLimitSec]
+  );
+
+  // Submit answer / skip
+  const submitAnswer = useCallback(
+    async (answerIdOrText: string) => {
+      if (!wsRef.current || !nav.roomId || !currentQuestion?.id || !currentParticipantId) return;
+      if (!questionOpen) return;
+      if (mySubmitted) return;
+
+      const time_taken_ms = Math.max(0, Date.now() - (questionStartMsRef.current || Date.now()));
+
+      await api.sendCooperativeJeopardyAnswerSubmit(wsRef.current, nav.roomId, {
+        question_id: currentQuestion.id!,
+        answer_id: answerIdOrText,
+        participant_id: currentParticipantId,
+        time_taken_ms,
+      });
+
+      // optimistic update
+      const next = new Map(participantAnswersRef.current);
+      next.set(currentParticipantId, { answer_id: answerIdOrText, time_taken: time_taken_ms });
+      participantAnswersRef.current = next;
+      setParticipantAnswers(next);
+
+      setMySubmitted(true);
+    },
+    [nav.roomId, currentQuestion, currentParticipantId, questionOpen, mySubmitted]
+  );
+
+  const submitSelected = useCallback(async () => {
+    if (!currentQuestion) return;
+
+    if (currentQuestion.type === 'short_answer') {
+      const text = (shortAnswerDraft ?? '').trim();
+      if (!text) return;
+      await submitAnswer(text);
+      return;
+    }
+
+    if (!selectedAnswerId) return;
+    await submitAnswer(selectedAnswerId);
+  }, [currentQuestion, shortAnswerDraft, selectedAnswerId, submitAnswer]);
+
+  const skipAnswer = useCallback(async () => {
+    await submitAnswer('NO_ANSWER');
+  }, [submitAnswer]);
+
+  // WS connect & message handling
+  useEffect(() => {
+    if (!nav.roomId) return;
+
+    const ws = api.connectToRoomWebSocket(nav.roomId);
+    wsRef.current = ws;
+
+    ws.onmessage = event => {
+      const msg = typeof event.data === 'string' ? safeJsonParse(event.data) : null;
+      if (!msg) return;
+
+      const { type, data } = msg;
+
+      switch (type) {
+        case 'room_state': {
+          if (data?.participants) setParticipants(data.participants);
+          if (typeof data?.current_participant_id === 'string') {
+            setCurrentParticipantId(data.current_participant_id);
+          }
+          break;
+        }
+
+        case 'cooperative_jeopardy_start': {
+          // board already visible
+          break;
+        }
+
+        case 'cooperative_jeopardy_question_started': {
+          const q = data.question;
+
+          const cell = data.cell;
+          if (cell?.category && cell?.points) {
+            lastPickedCellRef.current = {
+              category: String(cell.category),
+              points: Number(cell.points),
+            };
+          } else {
+            const cat = (q?.category || 'Uncategorized') as string;
+            const pts = Number(q?.points ?? 0);
+            if (cat && pts) lastPickedCellRef.current = { category: cat, points: pts };
+          }
+
+          setHasFirstQuestionStarted(true);
+
+          setCurrentQuestion(q);
+          setTimeLimitSec(Number(data.time_limit ?? 20));
+
+          setParticipantAnswers(new Map());
+          participantAnswersRef.current = new Map();
+          setSelectedAnswerId(null);
+          setShortAnswerDraft('');
+          setMySubmitted(false);
+
+          questionStartMsRef.current = Date.now();
+          setQuestionOpen(true);
+          setStage('QUESTION');
+          break;
+        }
+
+        case 'cooperative_jeopardy_answer_submitted': {
+          const pid = data.participant_id as string | undefined;
+          const answer_id = data.answer_id as string | undefined;
+          const time_taken = Number(data.time_taken_ms ?? data.time_taken ?? 0);
+          if (!pid || !answer_id) break;
+
+          const now = new Map(participantAnswersRef.current);
+          now.set(pid, { answer_id, time_taken });
+          participantAnswersRef.current = now;
+          setParticipantAnswers(now);
+
+          // host: if all answered, finalize immediately (with snapshot)
+          if (nav.isHost && currentQuestion?.id) {
+            const active = getActivePlayersExcludingHost(participantsRef.current);
+            const allAnswered = active.length > 0 && active.every(p => now.has(p.id));
+            if (allAnswered) void hostFinalizeToResults(now);
+          }
+
+          break;
+        }
+
+        case 'cooperative_jeopardy_question_results': {
+          const payload = data as ResultsPayload;
+
+          if (payload && Array.isArray(payload.all_answers) && Array.isArray(payload.ratings)) {
+            setLastResults(payload);
+            setScoreboard(payload.ratings);
+
+            const totals = new Map<string, number>();
+            for (const r of payload.ratings) totals.set(r.participant_id, r.total_score);
+            totalsRef.current = totals;
+          }
+
+          setQuestionOpen(false);
+          setStage('RESULTS');
+          break;
+        }
+
+        case 'cooperative_jeopardy_chooser_selected': {
+          setChooser({
+            chooser_id: data.chooser_id,
+            chooser_name: data.chooser_name,
+            is_initial: !!data.is_initial,
+          });
+
+          const rc = data.revealed_cell;
+          if (rc?.category && rc?.points) {
+            setRevealedCells(prev => {
+              const next = new Set(prev);
+              next.add(makeCellId(String(rc.category), Number(rc.points)));
+              return next;
+            });
+          }
+
+          setParticipantAnswers(new Map());
+          participantAnswersRef.current = new Map();
+          setSelectedAnswerId(null);
+          setShortAnswerDraft('');
+          setMySubmitted(false);
+          setCurrentQuestion(null);
+          setQuestionOpen(false);
+          setLastResults(null);
+          setStage('BOARD');
+          break;
+        }
+
+        case 'cooperative_jeopardy_quiz_end': {
+          const payload = data as Partial<FinalPayload> | undefined;
+          const finals =
+            payload?.final_ratings && Array.isArray(payload.final_ratings)
+              ? payload.final_ratings
+              : computeFinalRatings();
+
+          setFinalRatings(finals);
+          setStage('FINAL');
+          break;
+        }
+
+        default:
+          break;
+      }
+    };
+
+    return () => {
+      api.disconnectFromRoomWebSocket(nav.roomId as string);
+      wsRef.current = null;
+    };
+  }, [nav.roomId, nav.isHost, currentQuestion, hostFinalizeToResults, computeFinalRatings]);
+
+  // Guard
+  if (!nav.roomId || !quiz) return <Navigate to="/" replace />;
+
+  const hasQuestions = !loadingQuiz && questions.length > 0 && categoryNames.length > 0;
+
+  const progressTotal = Math.max(playableTotal, 1);
+  const progressDone = playableDone;
+
+  const showHostPickFirstBadge = nav.isHost && !hasFirstQuestionStarted;
+
+  return (
+    <div className="coop-jeopardy">
+      <div className="cj-header">
+        <div className="cj-titleBlock">
+          <h1 className="cj-title">{quiz.title}</h1>
+          <div className="cj-subtitle">
+            Room <b>{nav.roomId}</b> · Role <b>{nav.isHost ? 'Host' : 'Player'}</b>
+            {' · '}
+            Chooser <b>{chooser?.chooser_name ?? '—'}</b>
+            {chooser && (iAmChooser ? <span className="cj-badge">You choose</span> : null)}
+            {showHostPickFirstBadge ? <span className="cj-badge">Pick first question</span> : null}
+          </div>
+        </div>
+
+        <div className="cj-actions">
+          {nav.isHost && !hasFirstQuestionStarted && (
+            <button className="cj-btn cj-btnPrimary" onClick={() => void hostStartGame()} disabled={loadingQuiz}>
+              {loadingQuiz ? 'Loading…' : 'Start game'}
+            </button>
+          )}
+          <button className="cj-btn cj-btnGhost" onClick={() => navigate(-1)}>
+            Back
+          </button>
+        </div>
+      </div>
+
+      <div className="cj-main">
+        <div className="cj-left">
+          {/* BOARD */}
+          {stage === 'BOARD' && (
+            <div className="cj-boardCard">
+              <div className="cj-progress">
+                <div className="cj-progressBar">
+                  <div
+                    className="cj-progressFill"
+                    style={{ width: `${(progressDone / progressTotal) * 100}%` }}
+                  />
+                </div>
+                <div className="cj-progressText">
+                  {progressDone} of {playableTotal} answered
+                </div>
+              </div>
+
+              {loadingQuiz && <div className="cj-muted">Loading questions…</div>}
+
+              {!loadingQuiz && !hasQuestions && (
+                <div className="cj-empty">
+                  No questions loaded for this quiz (or missing categories/points).
+                </div>
+              )}
+
+              {hasQuestions && (
+                <div className="cj-board">
+                  <div className="cj-boardHeader" style={{ gridTemplateColumns: gridCols }}>
+                    {categoryNames.map(cat => (
+                      <div key={cat} className="cj-cat">
+                        {cat}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="cj-boardGrid">
+                    {pointValues.map(points => (
+                      <div key={points} className="cj-row" style={{ gridTemplateColumns: gridCols }}>
+                        {categoryNames.map(cat => {
+                          const id = makeCellId(cat, points);
+                          const revealed = revealedCells.has(id);
+                          const hasQuestionCell = !!getQuestionByCategoryAndPoints(questions, cat, points);
+                          const clickable = canPickCell && !revealed && hasQuestionCell;
+
+                          return (
+                            <button
+                              key={id}
+                              className={[
+                                'cj-cell',
+                                revealed ? 'isRevealed' : 'isHidden',
+                                clickable ? 'isClickable' : '',
+                                !hasQuestionCell ? 'isMissing' : '',
+                              ].join(' ')}
+                              disabled={!clickable}
+                              onClick={() => void handleCellClick(cat, points)}
+                              title={
+                                !hasQuestionCell
+                                  ? 'No question for this cell'
+                                  : revealed
+                                    ? 'Already answered'
+                                    : !chooser
+                                      ? nav.isHost
+                                        ? 'Host selects the first question'
+                                        : 'Waiting for host to pick the first question'
+                                      : !canPickCell
+                                        ? 'Only chooser can select'
+                                        : 'Select this question'
+                              }
+                            >
+                              {revealed ? <span className="cj-check">✓</span> : <span className="cj-points">${points}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="cj-hint">
+                    {!chooser
+                      ? nav.isHost
+                        ? 'Pick the first question.'
+                        : 'Waiting for host to pick the first question.'
+                      : canPickCell
+                        ? 'Select a cell to start the next question.'
+                        : 'Wait for the chooser to select a cell.'}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* QUESTION */}
+          {stage === 'QUESTION' && currentQuestion && (
+            <div className="cj-questionCard">
+              <div className="cj-questionTop">
+                <div className="cj-questionMeta">
+                  <span className="cj-metaPill">{(currentQuestion as any).category || 'Uncategorized'}</span>
+                  <span className="cj-metaPill">${Number((currentQuestion as any).points ?? 0)}</span>
+                  <span className="cj-metaPill">
+                    {answeredCount}/{totalParticipants} answered
+                  </span>
+                </div>
+
+                {questionOpen ? (
+                  <div className={['cj-timer', timeLeftSec <= 10 ? 'isWarn' : ''].join(' ')}>
+                    {timeLeftSec}s
+                  </div>
+                ) : (
+                  <div className="cj-timer isClosed">Closed</div>
+                )}
+              </div>
+
+              <div className="cj-questionText">{currentQuestion.question}</div>
+
+              {/* Media (image/audio) */}
+              {(currentQuestion.image_url || currentQuestion.audio_url) && (
+                <div className="cj-questionMedia">
+                  {currentQuestion.image_url && (
+                    <img
+                      className="cj-questionImage"
+                      src={resolveMediaUrl(currentQuestion.image_url)}
+                      alt="Question"
+                    />
+                  )}
+                  {currentQuestion.audio_url && (
+                    <audio
+                      className="cj-questionAudio"
+                      controls
+                      src={resolveMediaUrl(currentQuestion.audio_url)}
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* Host view: only relevant UI (no broadcast) */}
+              {nav.isHost && (
+                <>
+                  {!isShortAnswer ? (
+                    <div className="cj-answers cj-answersHost">
+                      {(currentQuestion.answers || []).map((a: any) => (
+                        <button key={a.id} className="cj-answer" disabled>
+                          {a.answer}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="cj-shortAnswerSection">
+                      <input
+                        className="cj-shortAnswerInput"
+                        value=""
+                        disabled
+                        placeholder="Short answer (host view only)"
+                      />
+                    </div>
+                  )}
+
+                  <div className="cj-questionFooter">
+                    <div className="cj-answerStatus">
+                      Host is not a player. Responded: <b>{answeredCount}</b> / <b>{activeParticipants.length}</b>
+                    </div>
+
+                    {questionOpen && (
+                      <button className="cj-btn cj-btnDanger" onClick={() => void hostFinalizeToResults()}>
+                        End question
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Player view */}
+              {!nav.isHost && (
+                <>
+                  {!isShortAnswer ? (
+                    <div className="cj-answers">
+                      {(currentQuestion.answers || []).map((a: any) => {
+                        const picked = selectedAnswerId === a.id;
+                        return (
+                          <button
+                            key={a.id}
+                            className={['cj-answer', picked ? 'isPicked' : ''].join(' ')}
+                            disabled={!questionOpen || mySubmitted || !currentParticipantId}
+                            onClick={() => setSelectedAnswerId(a.id)}
+                          >
+                            {a.answer}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="cj-shortAnswerSection">
+                      <input
+                        className="cj-shortAnswerInput"
+                        value={shortAnswerDraft}
+                        onChange={e => setShortAnswerDraft(e.target.value)}
+                        disabled={!questionOpen || mySubmitted || !currentParticipantId}
+                        placeholder="Type your answer…"
+                      />
+                    </div>
+                  )}
+
+                  <div className="cj-questionFooter">
+                    <div className="cj-answerStatus">
+                      {mySubmitted ? (
+                        <span>
+                          You have <b>responded</b>.
+                        </span>
+                      ) : (
+                        <span>Submit, or skip.</span>
+                      )}
+                    </div>
+
+                    <div className="cj-answerButtons">
+                      <button
+                        className="cj-btn cj-btnGhost"
+                        disabled={!questionOpen || mySubmitted || !currentParticipantId}
+                        onClick={() => void skipAnswer()}
+                      >
+                        Skip
+                      </button>
+
+                      <button
+                        className="cj-btn cj-btnPrimary"
+                        disabled={
+                          !questionOpen ||
+                          mySubmitted ||
+                          !currentParticipantId ||
+                          (isShortAnswer ? shortAnswerDraft.trim() === '' : !selectedAnswerId)
+                        }
+                        onClick={() => void submitSelected()}
+                      >
+                        {mySubmitted ? 'Submitted' : 'Submit answer'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Participants Status (bottom) */}
+              <div className="participant-status">
+                <h3>Participants Status</h3>
+                <div className="status-list">
+                  {activeParticipants.length === 0 ? (
+                    <p className="no-players">No active players yet.</p>
+                  ) : (
+                    activeParticipants.map(participant => {
+                      const entry = participantAnswers.get(participant.id);
+                      const hasAnswered = !waitingForAnswers.has(participant.id);
+                      const isSkipped = entry?.answer_id === 'NO_ANSWER';
+
+                      return (
+                        <div
+                          key={participant.id}
+                          className={[
+                            'status-item',
+                            hasAnswered ? (isSkipped ? 'skipped' : 'answered') : 'waiting',
+                          ].join(' ')}
+                        >
+                          <div className="participant-info">
+                            <span className="participant-name">{participant.guest_name}</span>
+                            {participant.id === currentParticipantId && (
+                              <span className="you-badge">You</span>
+                            )}
+                          </div>
+
+                          <div className="answer-status">
+                            <span className="status-icon">
+                              {hasAnswered ? (isSkipped ? '—' : '✓') : '…'}
+                            </span>
+                            <span className="status-text">
+                              {hasAnswered ? (isSkipped ? 'Skipped' : 'Answered') : 'Waiting'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* RESULTS */}
+          {stage === 'RESULTS' && lastResults && (
+            <div className="cj-resultsCard">
+              <div className="cj-cardTitle">Results</div>
+
+              <div className="cj-resultsQuestion">
+                <div className="cj-resultsQText">{currentQuestion?.question ?? 'Question'}</div>
+                <div className="cj-resultsQMeta">
+                  <span className="cj-metaPill">{(currentQuestion as any)?.category || 'Uncategorized'}</span>
+                  <span className="cj-metaPill">${Number((currentQuestion as any)?.points ?? 0)}</span>
+                </div>
+              </div>
+
+              <div className="cj-resultsTable">
+                {lastResults.all_answers
+                  .slice()
+                  .sort((a, b) => {
+                    const rank = (x: AnswerRecord) => (x.answer_id === 'NO_ANSWER' ? 1 : x.is_correct ? 0 : 2);
+                    return rank(a) - rank(b);
+                  })
+                  .map(a => {
+                    const skipped = a.answer_id === 'NO_ANSWER';
+                    const cls = skipped ? 'isSkipped' : a.is_correct ? 'isCorrect' : 'isWrong';
+
+                    const pts = Number((currentQuestion as any)?.points ?? 0);
+                    const delta = skipped ? 0 : a.is_correct ? +pts : -pts;
+
+                    const isMe = !!currentParticipantId && a.participant_id === currentParticipantId;
+
+                    const avatar = getParticipantAvatar(participantsRef.current, a);
+
+                    return (
+                      <div key={a.participant_id} className={['cj-resultLine', cls].join(' ')}>
+                        <div className="cj-resultLeft">
+                          <div className="cj-resultName">
+                            <div className="user-avatar">
+                              {avatar ? (
+                                avatar.startsWith('http') ? (
+                                  <img src={avatar} alt={a.participant_name} />
+                                ) : (
+                                  <div className="avatar-placeholder">{avatar}</div>
+                                )
+                              ) : (
+                                <div className="avatar-placeholder">
+                                  {a.participant_name.charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                            </div>
+
+                            {a.participant_name}
+                            {isMe ? <span className="cj-pill cj-pillAccent">You</span> : null}
+                          </div>
+
+                          <div className="cj-resultAnswer">
+                            {skipped ? '—' : findAnswerText(currentQuestion, a.answer_id)}
+                          </div>
+                        </div>
+
+                        <div className="cj-resultRight">
+                          <div className="cj-resultTag">
+                            {skipped ? 'Skipped' : a.is_correct ? 'Correct' : 'Wrong'}
+                          </div>
+                          <div className="cj-resultDelta">
+                            {delta >= 0 ? `+${delta}` : `${delta}`} pts
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+
+              <div className="cj-resultsFooter">
+                {nav.isHost ? (
+                  <button className="cj-btn cj-btnPrimary" onClick={() => void hostContinueAfterResults()}>
+                    Continue
+                  </button>
+                ) : (
+                  <div className="cj-muted">Waiting for host to continue…</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* FINAL RATINGS */}
+          {stage === 'FINAL' && (
+            <div className="cj-resultsCard">
+              <div className="cj-cardTitle">Final ratings</div>
+
+              <div className="cj-muted">
+                Completed: {playableDone} / {playableTotal} questions
+              </div>
+
+              <div className="cj-results" style={{ marginTop: 12 }}>
+                {(finalRatings ?? computeFinalRatings()).map((r, idx) => {
+                  const p = participants.find(x => x.id === r.participant_id);
+                  const avatar = (p as any)?.guest_avatar as string | undefined;
+
+                  return (
+                    <div key={r.participant_id} className="cj-resultRow">
+                      <div className="cj-resultName">
+                        <span className="cj-rank">#{idx + 1}</span>
+
+                        <div className="user-avatar">
+                          {avatar ? (
+                            avatar.startsWith('http') ? (
+                              <img src={avatar} alt={r.participant_name} />
+                            ) : (
+                              <div className="avatar-placeholder">{avatar}</div>
+                            )
+                          ) : (
+                            <div className="avatar-placeholder">
+                              {r.participant_name.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+
+                        {r.participant_name}
+                      </div>
+
+                      <div className="cj-resultScore">
+                        <b>{r.total_score}</b>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="cj-resultsFooter">
+                <button className="cj-btn cj-btnPrimary" onClick={() => navigate(-1)}>
+                  Back
+                </button>
+                <button className="cj-btn cj-btnGhost" onClick={() => navigate('/', { replace: true })}>
+                  Home
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* SIDEBAR */}
+        <div className="cj-right">
+          <div className="cj-card">
+            <div className="cj-cardTitle">Players (no host)</div>
+            <div className="cj-players">
+              {activePlayers.map(p => {
+                const total = totalsRef.current.get(p.id) ?? 0;
+                const isCh = chooser?.chooser_id === p.id;
+                const avatar = (p as any)?.guest_avatar;
+
+                return (
+                  <div key={p.id} className="cj-playerRow">
+                    <div className="cj-playerName">
+                      {avatar ? <span className="cj-pill">{avatar}</span> : null}
+                      {p.guest_name}
+                      {isCh ? <span className="cj-pill cj-pillAccent">chooser</span> : null}
+                    </div>
+                    <div className="cj-playerScore">{total}</div>
+                  </div>
+                );
+              })}
+              {activePlayers.length === 0 && <div className="cj-muted">No active players.</div>}
+            </div>
+          </div>
+
+          <div className="cj-card">
+            <div className="cj-cardTitle">Last ratings</div>
+            {scoreboard.length === 0 ? (
+              <div className="cj-muted">No results yet.</div>
+            ) : (
+              <div className="cj-results">
+                {scoreboard
+                  .slice()
+                  .sort((a, b) => b.total_score - a.total_score)
+                  .map(r => (
+                    <div key={r.participant_id} className="cj-resultRow">
+                      <div className="cj-resultName">{r.participant_name}</div>
+                      <div className="cj-resultScore">
+                        <b>{r.total_score}</b>
+                        <span className="cj-delta">
+                          ({r.rating_change >= 0 ? '+' : ''}
+                          {r.rating_change})
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

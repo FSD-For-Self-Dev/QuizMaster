@@ -14,9 +14,11 @@ from app.schemas.room import RoomWithParticipants
 # room_id -> set of WebSocket connections
 active_connections: Dict[str, Set[WebSocket]] = {}
 
-# Store cooperative quiz state
-# room_id -> quiz_state
+# Store cooperative quiz state (classic)
 cooperative_quiz_state: Dict[str, dict] = {}
+
+# Store cooperative jeopardy state (NEW: separate)
+cooperative_jeopardy_state: Dict[str, dict] = {}
 
 router = APIRouter()
 
@@ -34,13 +36,12 @@ async def get_websocket_db():
 async def connect_to_room(websocket: WebSocket, room_id: str):
     """Connect a WebSocket to a room."""
     await websocket.accept()
-    
+
     if room_id not in active_connections:
         active_connections[room_id] = set()
-    
+
     active_connections[room_id].add(websocket)
-    
-    # Send current room state to the newly connected client
+
     try:
         await send_room_update(room_id, "user_connected", {"message": "Connected to room"})
     except Exception as e:
@@ -51,8 +52,6 @@ async def disconnect_from_room(websocket: WebSocket, room_id: str):
     """Disconnect a WebSocket from a room."""
     if room_id in active_connections:
         active_connections[room_id].discard(websocket)
-        
-        # Clean up empty room connections
         if not active_connections[room_id]:
             del active_connections[room_id]
 
@@ -78,12 +77,7 @@ async def broadcast_to_room(room_id: str, message: dict):
 
 async def send_room_update(room_id: str, event_type: str, data: dict):
     """Send a room update to all participants."""
-    message = {
-        "type": event_type,
-        "data": data,
-        "timestamp": datetime.utcnow().isoformat()
-    }
-    
+    message = {"type": event_type, "data": data, "timestamp": datetime.utcnow().isoformat()}
     await broadcast_to_room(room_id, message)
 
 
@@ -104,6 +98,7 @@ async def room_websocket_endpoint(
     """WebSocket endpoint for real-time room updates."""
     await connect_to_room(websocket, room_id)
 
+    # Send initial room state
     try:
         room_state = get_room_with_participants(db, room_id)
         if room_state:
@@ -115,30 +110,53 @@ async def room_websocket_endpoint(
             payload = {
                 "type": "room_state",
                 "data": room_schema.model_dump(),
-                "timestamp": datetime.utcnow(),  # datetime OK here
+                "timestamp": datetime.utcnow(),
             }
             await websocket.send_text(json.dumps(jsonable_encoder(payload)))
     except Exception as e:
         print(f"Error sending initial room state: {e}")
-    
-    try:
-      while True:
-          raw = await websocket.receive_text()
-          msg = json.loads(raw)
-          msg_type = msg.get("type")
-          data = msg.get("data", {})
 
-          # Cooperative quiz messages forwarded to all
-          if msg_type in {
-              "cooperative_quiz_start",
-              "cooperative_new_question",
-              "cooperative_answer_submitted",
-              "cooperative_answer_status",
-              "cooperative_question_results",
-              "cooperative_quiz_end",
-          }:
-              await send_room_update(room_id, msg_type, data)
-          # You can add other message types as needed (ping/pong, etc.)
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            msg = json.loads(raw)
+            msg_type = msg.get("type")
+            data = msg.get("data", {})
+
+            # Cooperative classic quiz messages forwarded to all
+            if msg_type in {
+                "cooperative_quiz_start",
+                "cooperative_new_question",
+                "cooperative_answer_submitted",
+                "cooperative_answer_status",
+                "cooperative_question_results",
+                "cooperative_quiz_end",
+                "cooperative_answer_status_request",
+                "cooperative_next_question",
+            }:
+                await send_room_update(room_id, msg_type, data)
+                continue
+
+            # Cooperative Jeopardy messages forwarded to all (NEW)
+            if msg_type in {
+                "cooperative_jeopardy_start",
+                "cooperative_jeopardy_chooser_selected",
+                "cooperative_jeopardy_category_selected",
+                "cooperative_jeopardy_question_started",
+                "cooperative_jeopardy_answer_submitted",
+                "cooperative_jeopardy_question_results",
+                "cooperative_jeopardy_quiz_end",
+            }:
+                await send_room_update(room_id, msg_type, data)
+                continue
+
+            # Optional: ignore pings
+            if msg_type in {"ping"}:
+                await send_to_sender(websocket, {"type": "pong", "data": {}, "timestamp": datetime.utcnow().isoformat()})
+                continue
+
+            # Unknown message types: ignore or log
+            print(f"Unknown WS message type: {msg_type} in room {room_id}")
 
     except WebSocketDisconnect:
         await disconnect_from_room(websocket, room_id)
@@ -147,60 +165,46 @@ async def room_websocket_endpoint(
         await disconnect_from_room(websocket, room_id)
 
 
-# Cooperative Quiz Handler Functions
-
+# Cooperative Quiz Handler Functions (unchanged)
 async def handle_cooperative_quiz_start(room_id: str, data: dict, db: Session):
-    """Handle cooperative quiz start."""
     print(f"Starting cooperative quiz in room {room_id}")
-    
-    # Initialize quiz state
+
     cooperative_quiz_state[room_id] = {
         "quiz_started": True,
         "current_question_index": 0,
-        "participant_answers": {},  # participant_id -> answer_data
+        "participant_answers": {},
         "quiz_data": data.get("quiz_data", {}),
         "question_start_time": datetime.utcnow().isoformat()
     }
-    
-    # Update room status
+
     try:
         from app.services.room import update_room_status
         update_room_status(db, room_id, "started")
     except Exception as e:
         print(f"Error updating room status: {e}")
-    
-    # Broadcast quiz start to all participants
-    await send_room_update(
-        room_id,
-        "cooperative_quiz_start",
-        data
-    )
+
+    await send_room_update(room_id, "cooperative_quiz_start", data)
 
 
 async def handle_cooperative_answer_submit(room_id: str, data: dict, db: Session):
-    """Handle cooperative answer submission."""
     participant_id = data.get("participant_id")
     question_id = data.get("question_id")
     answer_id = data.get("answer_id")
-    
+
     print(f"Answer submitted: participant {participant_id}, question {question_id}")
-    
-    # Get room participants to get participant name
+
     room_state = get_room_with_participants(db, room_id)
     participant = None
     if room_state:
         participants = room_state.participants if hasattr(room_state, 'participants') else []
         participant = next((p for p in participants if p.id == participant_id), None)
-    
+
     if not participant:
         print(f"Participant {participant_id} not found in room {room_id}")
         return
-    
-    # Calculate if answer is correct (simplified logic)
-    # In a real implementation, you'd look up the correct answer from the database
-    is_correct = False  # This should be calculated based on the actual answer
-    
-    # Store answer in quiz state
+
+    is_correct = False
+
     if room_id in cooperative_quiz_state:
         cooperative_quiz_state[room_id]["participant_answers"][participant_id] = {
             "participant_id": participant_id,
@@ -210,8 +214,7 @@ async def handle_cooperative_answer_submit(room_id: str, data: dict, db: Session
             "is_correct": is_correct,
             "submitted_at": datetime.utcnow().isoformat()
         }
-    
-    # Broadcast answer submission to all participants
+
     await send_room_update(
         room_id,
         "cooperative_answer_submitted",
@@ -226,30 +229,25 @@ async def handle_cooperative_answer_submit(room_id: str, data: dict, db: Session
 
 
 async def handle_cooperative_answer_status_request(websocket: WebSocket, room_id: str, data: dict, db: Session):
-    """Handle request for answer status."""
     question_id = data.get("question_id")
-    
-    # Get current quiz state
+
     if room_id not in cooperative_quiz_state:
         return
-    
+
     quiz_state = cooperative_quiz_state[room_id]
     participant_answers = quiz_state.get("participant_answers", {})
-    
-    # Get room participants
+
     room_state = get_room_with_participants(db, room_id)
     active_participants = []
     if room_state:
         participants = room_state.participants if hasattr(room_state, 'participants') else []
         active_participants = [p for p in participants if p.is_active and not p.is_spectator]
-    
-    # Determine who has answered
+
     waiting_participants = []
     for participant in active_participants:
         if participant.id not in participant_answers:
             waiting_participants.append(participant.id)
-    
-    # Send status back to requester
+
     await send_to_sender(websocket, {
         "type": "cooperative_answer_status",
         "data": {
@@ -263,18 +261,15 @@ async def handle_cooperative_answer_status_request(websocket: WebSocket, room_id
 
 
 async def handle_cooperative_next_question(room_id: str, data: dict, db: Session):
-    """Handle moving to next question."""
     question_index = data.get("question_index", 0)
-    
+
     print(f"Moving to question {question_index} in room {room_id}")
-    
+
     if room_id in cooperative_quiz_state:
         cooperative_quiz_state[room_id]["current_question_index"] = question_index
         cooperative_quiz_state[room_id]["question_start_time"] = datetime.utcnow().isoformat()
-        # Clear previous answers for new question
         cooperative_quiz_state[room_id]["participant_answers"] = {}
-    
-    # Broadcast new question to all participants
+
     await send_room_update(
         room_id,
         "cooperative_new_question",
@@ -286,42 +281,26 @@ async def handle_cooperative_next_question(room_id: str, data: dict, db: Session
 
 
 async def handle_cooperative_question_results(room_id: str, data: dict, db: Session):
-    """Handle question results."""
     print(f"Question results for room {room_id}: {data}")
-    
-    # Broadcast results to all participants
-    await send_room_update(
-        room_id,
-        "cooperative_question_results",
-        data
-    )
+    await send_room_update(room_id, "cooperative_question_results", data)
 
 
 async def handle_cooperative_quiz_end(room_id: str, data: dict, db: Session):
-    """Handle quiz end."""
     print(f"Quiz ended for room {room_id}: {data}")
-    
-    # Update room status
+
     try:
         from app.services.room import update_room_status
         update_room_status(db, room_id, "finished")
     except Exception as e:
         print(f"Error updating room status: {e}")
-    
-    # Clear quiz state
+
     if room_id in cooperative_quiz_state:
         del cooperative_quiz_state[room_id]
-    
-    # Broadcast quiz end to all participants
-    await send_room_update(
-        room_id,
-        "cooperative_quiz_end",
-        data
-    )
+
+    await send_room_update(room_id, "cooperative_quiz_end", data)
 
 
 @router.get("/rooms/{room_id}/connections")
 async def get_room_connection_count(room_id: str):
-    """Get the number of active connections for a room."""
     count = len(active_connections.get(room_id, set()))
     return {"room_id": room_id, "active_connections": count}
