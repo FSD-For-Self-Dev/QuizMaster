@@ -90,9 +90,70 @@
 .question-text {
   font-size: 1.5rem;
   line-height: 1.6;
-  margin-bottom: 40px;
+  margin-bottom: 24px;
   text-align: center;
   font-weight: 500;
+}
+
+/* Question Media */
+.question-media {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
+
+.question-media .media-item {
+  max-width: 220px;
+  pointer-events: none;
+}
+
+.question-media .question-image {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.35);
+}
+
+.question-media .question-audio {
+  width: 260px;
+}
+
+/* Short Answer Input */
+.short-answer-section {
+  max-width: 500px;
+  margin: 0 auto 32px;
+  text-align: left;
+}
+
+.short-answer-label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.short-answer-input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.25);
+  color: white;
+  font-size: 1rem;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.short-answer-input:focus {
+  border-color: #4ecdc4;
+  box-shadow: 0 0 0 1px rgba(78, 205, 196, 0.4);
+  background: rgba(0, 0, 0, 0.35);
 }
 
 /* Answers Grid */
@@ -151,6 +212,154 @@
   cursor: not-allowed;
 }
 
+/* Jeopardy specific styling for better UX */
+.jeopardy-navigation .jeopardy-cell-info {
+  margin-bottom: 15px;
+}
+
+.jeopardy-navigation .confirm-btn {
+  font-size: 1.2rem;
+  padding: 20px 40px;
+  min-width: 200px;
+}
+
+/* Visual feedback for answered questions in Jeopardy */
+.question-content.answered {
+  border-color: rgba(78, 205, 196, 0.5);
+  box-shadow: 0 0 20px rgba(78, 205, 196, 0.2);
+}
+
+/* Answer confirmation hint */
+.answer-confirmation-hint {
+  margin-top: 15px;
+  padding: 12px 16px;
+  background: rgba(78, 205, 196, 0.1);
+  border: 1px solid rgba(78, 205, 196, 0.3);
+  border-radius: 10px;
+  text-align: center;
+}
+
+.answer-confirmation-hint p {
+  margin: 0;
+  color: #4ecdc4;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+/* Timer Styles */
+.quiz-timer {
+  margin: 20px 0;
+  display: flex;
+  justify-content: center;
+}
+
+.timer-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  border: 2px solid rgba(78, 205, 196, 0.5);
+  border-radius: 25px;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #4ecdc4;
+  box-shadow: 0 4px 15px rgba(78, 205, 196, 0.2);
+  transition: all 0.3s ease;
+}
+
+.timer-display.timer-warning {
+  border-color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.1);
+  color: #ff6b6b;
+  box-shadow: 0 4px 15px rgba(255, 107, 107, 0.2);
+  animation: timer-pulse 1s infinite;
+}
+
+.timer-icon {
+  font-size: 1.3rem;
+}
+
+.timer-text {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+}
+
+/* Jeopardy Score Styles */
+.quiz-meta {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.jeopardy-score {
+  background: linear-gradient(45deg, #4ecdc4, #45b7aa);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 1.1rem;
+  box-shadow: 0 4px 15px rgba(78, 205, 196, 0.3);
+}
+
+.jeopardy-cell-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.jeopardy-score-info {
+  background: rgba(78, 205, 196, 0.1);
+  color: #4ecdc4;
+  padding: 6px 12px;
+  border-radius: 15px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.jeopardy-final-score {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.jeopardy-score-circle {
+  background: linear-gradient(45deg, #4ecdc4, #45b7aa);
+  color: white;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 8px 25px rgba(78, 205, 196, 0.4);
+}
+
+.jeopardy-score-number {
+  font-size: 2rem;
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+.jeopardy-score-label {
+  font-size: 0.8rem;
+  opacity: 0.9;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+@keyframes timer-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
 .answer-text {
   position: relative;
   z-index: 1;
@@ -162,6 +371,24 @@
   justify-content: space-between;
   align-items: center;
   gap: 20px;
+}
+
+/* Jeopardy Navigation */
+.jeopardy-navigation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+}
+
+.jeopardy-cell-info {
+  background: rgba(78, 205, 196, 0.2);
+  color: #4ecdc4;
+  padding: 10px 15px;
+  border-radius: 20px;
+  font-weight: 500;
+  text-align: center;
 }
 
 .nav-btn {
@@ -197,6 +424,108 @@
 
 .next-btn:hover:not(:disabled) {
   box-shadow: 0 6px 20px rgba(255, 107, 107, 0.6);
+  transform: translateY(-2px);
+}
+
+.confirm-btn {
+  background: linear-gradient(45deg, #4ecdc4, #45b7aa);
+  border: none;
+  box-shadow: 0 4px 15px rgba(78, 205, 196, 0.4);
+  font-weight: 600;
+  padding: 18px 35px;
+  font-size: 1.1rem;
+}
+
+.confirm-btn:hover:not(:disabled) {
+  box-shadow: 0 6px 20px rgba(78, 205, 196, 0.6);
+  transform: translateY(-2px);
+}
+
+/* Answer Verdict Screen */
+.answer-verdict-screen {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 40px;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(15px);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  text-align: center;
+}
+
+.verdict-header {
+  margin-bottom: 30px;
+}
+
+.verdict-icon {
+  font-size: 4rem;
+  margin-bottom: 20px;
+}
+
+.verdict-icon.correct {
+  color: #2ed573;
+}
+
+.verdict-icon.incorrect {
+  color: #ff6b6b;
+}
+
+.verdict-title {
+  font-size: 2rem;
+  font-weight: bold;
+  margin: 0;
+}
+
+.verdict-title.correct {
+  color: #2ed573;
+}
+
+.verdict-title.incorrect {
+  color: #ff6b6b;
+}
+
+.correct-answer-display {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.correct-answer-label {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0 0 8px 0;
+}
+
+.correct-answer-text {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #4ecdc4;
+  margin: 0;
+}
+
+.verdict-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.continue-btn {
+  padding: 15px 30px;
+  background: linear-gradient(45deg, #4ecdc4, #45b7aa);
+  border: none;
+  border-radius: 25px;
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(78, 205, 196, 0.4);
+}
+
+.continue-btn:hover {
+  box-shadow: 0 6px 20px rgba(78, 205, 196, 0.6);
   transform: translateY(-2px);
 }
 
@@ -267,6 +596,13 @@
   margin-bottom: 20px;
 }
 
+.classic-final-score {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 30px;
+}
+
 .score-circle {
   width: 120px;
   height: 120px;
@@ -280,6 +616,18 @@
   position: relative;
 }
 
+.points-circle {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: linear-gradient(45deg, #4ecdc4, #45b7aa);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 25px rgba(78, 205, 196, 0.4);
+}
+
 .score-number {
   font-size: 2.5rem;
   font-weight: bold;
@@ -291,6 +639,21 @@
   font-size: 1.2rem;
   color: rgba(255, 255, 255, 0.9);
   margin-top: 2px;
+}
+
+.points-number {
+  font-size: 2rem;
+  font-weight: bold;
+  color: white;
+  line-height: 1;
+}
+
+.points-label {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.9);
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 /* Results Stats */
@@ -464,6 +827,107 @@
   transform: translateY(-2px);
 }
 
+/* Jeopardy Board Styles */
+.jeopardy-board {
+  margin: 20px auto;
+  max-width: 800px;
+  width: 100%;
+}
+
+.board-categories {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.board-category {
+  background: rgba(78, 205, 196, 0.2);
+  border: 2px solid rgba(78, 205, 196, 0.3);
+  border-radius: 15px;
+  padding: 15px;
+  text-align: center;
+  cursor: default;
+  transition: all 0.3s ease;
+}
+
+.board-category:hover {
+  background: rgba(78, 205, 196, 0.3);
+}
+
+.category-title {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #4ecdc4;
+}
+
+.board-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.board-row {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+
+.board-cell {
+  aspect-ratio: 1 / 1;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 1.2rem;
+  font-weight: bold;
+}
+
+.board-cell:hover:not(.revealed) {
+  background: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+}
+
+.board-cell.unrevealed {
+  background: linear-gradient(135deg, #ff6b6b, #4ecdc4);
+}
+
+.board-cell.unrevealed .cell-content {
+  color: white;
+}
+
+.board-cell.revealed {
+  background: rgba(46, 213, 115, 0.2);
+  border-color: rgba(46, 213, 115, 0.4);
+  cursor: default;
+}
+
+.cell-content {
+  text-align: center;
+}
+
+.points-value {
+  font-size: 1.3rem;
+}
+
+.answered-check {
+  font-size: 1.5rem;
+  color: #2ed573;
+}
+
+.hint-text {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 20px;
+  font-style: italic;
+}
+
+
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .quiz-player {
@@ -523,6 +987,15 @@
     width: 100%;
     max-width: 300px;
   }
+
+  /* Adjust Jeopardy board for mobile */
+  .board-categories {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
+
+  .board-row {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
 }
 
 @media (max-width: 480px) {
@@ -534,13 +1007,26 @@
     font-size: 1.1rem;
   }
 
-  .score-circle {
+  .classic-final-score {
+    gap: 20px;
+  }
+
+  .score-circle,
+  .points-circle {
     width: 100px;
     height: 100px;
   }
 
   .score-number {
     font-size: 2rem;
+  }
+
+  .points-number {
+    font-size: 1.7rem;
+  }
+
+  .points-label {
+    font-size: 0.7rem;
   }
 
   .results-stats {

@@ -4,6 +4,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Question, Answer } from './QuizEditor';
 import { QuestionCard } from './QuestionCard';
+import { resolveMediaUrl } from '../api';
 import './ClassicQuizEditor.css';
 
 interface ClassicQuizEditorProps {
@@ -220,6 +221,43 @@ const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({
     onSave(editedQuestion);
   };
 
+  const updateQuestion = (updates: Partial<Question>) => {
+    setEditedQuestion(prev => ({
+      ...prev,
+      ...updates
+    }));
+  };
+
+  const handleAudioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Create blob URL for preview
+    const objectUrl = URL.createObjectURL(file);
+
+    // Update question: keep `file` for later upload, use `objectUrl` for preview
+    updateQuestion({
+      // ...question,
+      audio: file,        // ← Keep original file
+      audio_url: objectUrl, // ← Use for preview in player/editor
+    });
+  };
+
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Create blob URL for preview
+    const objectUrl = URL.createObjectURL(file);
+
+    // Update question: keep `file` for later upload, use `objectUrl` for preview
+    updateQuestion({
+      // ...question,
+      image: file,        // ← Keep original file
+      image_url: objectUrl, // ← Use for preview in player/editor
+    });
+  };
+
   // Check if save button should be disabled
   const isSaveDisabled = () => {
     if (editedQuestion.type === 'multiple_choice') {
@@ -316,16 +354,7 @@ const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({
                       <input
                         type="file"
                         accept="image/*"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            const reader = new FileReader();
-                            reader.onload = (e) => {
-                              setEditedQuestion(prev => ({ ...prev, image_url: e.target?.result as string }));
-                            };
-                            reader.readAsDataURL(file);
-                          }
-                        }}
+                        onChange={(e) => handleImageUpload(e)}
                         style={{ display: 'none' }}
                         id="question-image-modal"
                       />
@@ -335,7 +364,7 @@ const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({
                     </div>
                     {editedQuestion.image_url && (
                       <div className="media-preview">
-                        <img src={editedQuestion.image_url} alt="Question" className="question-preview-image" />
+                        <img src={resolveMediaUrl(editedQuestion.image_url)} alt="Question" className="question-preview-image" />
                         <button
                           type="button"
                           className="media-delete-btn"
@@ -363,16 +392,7 @@ const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({
                       <input
                         type="file"
                         accept="audio/*"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            const reader = new FileReader();
-                            reader.onload = (e) => {
-                              setEditedQuestion(prev => ({ ...prev, audio_url: e.target?.result as string }));
-                            };
-                            reader.readAsDataURL(file);
-                          }
-                        }}
+                        onChange={(e) => handleAudioChange(e)}
                         style={{ display: 'none' }}
                         id="question-audio-modal"
                       />
@@ -382,7 +402,7 @@ const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({
                     </div>
                     {editedQuestion.audio_url && (
                       <div className="media-preview">
-                        <audio controls src={editedQuestion.audio_url} className="question-preview-audio" />
+                        <audio controls src={resolveMediaUrl(editedQuestion.audio_url)} className="question-preview-audio" />
                         <button
                           type="button"
                           className="media-delete-btn"

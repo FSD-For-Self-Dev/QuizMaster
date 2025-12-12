@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Question, Answer } from './QuizEditor';
+import { resolveMediaUrl } from '../api';
 import './JeopardyCategoryEditor.css';
 
 interface JeopardyCategoryEditorProps {
@@ -44,15 +45,12 @@ export const JeopardyCategoryEditor: React.FC<JeopardyCategoryEditorProps> = ({
     } else {
       const newQuestion: Question = {
         question: '',
-        type: 'jeopardy',
+        // Default to multiple choice; user can change type in modal
+        type: 'multiple_choice',
         category: categoryName,
         points,
         order_index: questions.length,
-        answers: [{
-          answer: '',
-          is_correct: true,
-          order_index: 0
-        }]
+        answers: []
       };
       setEditingQuestion(newQuestion);
     }
@@ -204,73 +202,341 @@ const JeopardyQuestionModal: React.FC<JeopardyQuestionModalProps> = ({
 }) => {
   const [editedQuestion, setEditedQuestion] = useState<Question>(question);
 
+  // Initialize media tab based on existing media (same logic as Classic editor)
+  const getInitialMediaTab = (question: Question): 'none' | 'image' | 'audio' | 'several' => {
+    const hasImage = !!question.image_url;
+    const hasAudio = !!question.audio_url;
+
+    if (hasImage && hasAudio) return 'several';
+    if (hasImage) return 'image';
+    if (hasAudio) return 'audio';
+    return 'none';
+  };
+
+  const [selectedMediaTab, setSelectedMediaTab] = useState<'none' | 'image' | 'audio' | 'several'>(
+    getInitialMediaTab(question)
+  );
+
+  const handleTypeChange = (type: Question['type']) => {
+    setEditedQuestion(prev => ({ ...prev, type }));
+  };
+
+  const addAnswer = () => {
+    const newAnswer: Answer = {
+      answer: '',
+      is_correct: false,
+      order_index: editedQuestion.answers?.length || 0
+    };
+    setEditedQuestion(prev => ({
+      ...prev,
+      answers: [...(prev.answers || []), newAnswer]
+    }));
+  };
+
+  const updateAnswer = (index: number, answer: Answer) => {
+    setEditedQuestion(prev => ({
+      ...prev,
+      answers: prev.answers?.map((a, i) => (i === index ? answer : a))
+    }));
+  };
+
+  const deleteAnswer = (index: number) => {
+    setEditedQuestion(prev => ({
+      ...prev,
+      answers: prev.answers?.filter((_, i) => i !== index)
+    }));
+  };
+
   const handleSave = () => {
-    if (editedQuestion.question.trim() && editedQuestion.answers?.[0]?.answer.trim()) {
-      onSave(editedQuestion);
+    onSave(editedQuestion);
+  };
+
+  const updateQuestion = (updates: Partial<Question>) => {
+    setEditedQuestion(prev => ({
+      ...prev,
+      ...updates
+    }));
+  };
+
+  const handleAudioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const objectUrl = URL.createObjectURL(file);
+
+    updateQuestion({
+      audio: file,
+      audio_url: objectUrl,
+    });
+  };
+
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const objectUrl = URL.createObjectURL(file);
+
+    updateQuestion({
+      image: file,
+      image_url: objectUrl,
+    });
+  };
+
+  // Same validation rules as Classic editor
+  const isSaveDisabled = () => {
+    if (editedQuestion.type === 'multiple_choice') {
+      const answers = editedQuestion.answers || [];
+      const hasAnswers = answers.length > 0;
+      const hasCorrectAnswer = answers.some(answer => answer.is_correct);
+      return !hasAnswers || !hasCorrectAnswer;
+    } else if (editedQuestion.type === 'short_answer') {
+      return !editedQuestion.correct_answer || editedQuestion.correct_answer.trim() === '';
     }
+    return false;
   };
 
   return (
     <div className="question-modal-overlay">
       <motion.div
-        className="question-modal"
+        className="question-editor-modal"
         initial={{ opacity: 0, scale: 0.8 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.8 }}
       >
         <div className="modal-header">
-          <h3>${question.points} Question - {categoryName}</h3>
-          <button onClick={onCancel} className="close-modal-btn">×</button>
+          <h2>{question.id ? 'Edit Question' : 'Create Question'} - {categoryName}</h2>
+          <button className="close-btn" onClick={onCancel}>×</button>
         </div>
 
         <div className="modal-content">
-          <div className="form-section">
-            <label>Question (Clue)</label>
+          <div className="form-group">
+            <label>Question Type</label>
+            <div className="type-selector">
+              {(['multiple_choice', 'short_answer'] as const).map(type => (
+                <button
+                  key={type}
+                  className={`type-btn ${editedQuestion.type === type ? 'active' : ''}`}
+                  onClick={() => handleTypeChange(type)}
+                >
+                  {type.replace('_', ' ').toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label>Question</label>
             <textarea
               value={editedQuestion.question}
               onChange={(e) => setEditedQuestion(prev => ({ ...prev, question: e.target.value }))}
-              placeholder="Enter the clue that contestants will see..."
+              placeholder="Enter your question..."
               className="question-textarea"
-              rows={4}
+              rows={3}
             />
           </div>
 
-          <div className="form-section">
-            <label>Answer</label>
+          {/* Question Media Section */}
+          <div className="form-group">
+            <label>Question Media (Optional)</label>
+
+            <div className="media-tabs">
+              {[
+                { id: 'none', label: 'None', icon: '🚫' },
+                { id: 'image', label: 'Image', icon: '📷' },
+                { id: 'audio', label: 'Audio', icon: '🎵' },
+                { id: 'several', label: 'Several', icon: '📎' }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={`media-tab ${selectedMediaTab === tab.id ? 'active' : ''}`}
+                  onClick={() => setSelectedMediaTab(tab.id as any)}
+                >
+                  <span className="tab-icon">{tab.icon}</span>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {selectedMediaTab !== 'none' && (
+              <div className="media-inputs-section">
+                {(selectedMediaTab === 'image' || selectedMediaTab === 'several') && (
+                  <div className="media-input-group">
+                    <label className="media-label">Image</label>
+                    <div className="media-controls">
+                      <input
+                        type="url"
+                        placeholder="Enter image URL..."
+                        className="media-url-input"
+                        onChange={(e) => setEditedQuestion(prev => ({ ...prev, image_url: e.target.value }))}
+                        value={editedQuestion.image_url?.startsWith('data:') ? '' : (editedQuestion.image_url || '')}
+                      />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleImageUpload(e)}
+                        style={{ display: 'none' }}
+                        id="jeopardy-question-image"
+                      />
+                      <label htmlFor="jeopardy-question-image" className="media-upload-btn">
+                        📷 Upload
+                      </label>
+                    </div>
+                    {editedQuestion.image_url && (
+                      <div className="media-preview">
+                        <img src={resolveMediaUrl(editedQuestion.image_url)} alt="Question" className="question-preview-image" />
+                        <button
+                          type="button"
+                          className="media-delete-btn"
+                          onClick={() => setEditedQuestion(prev => ({ ...prev, image_url: undefined }))}
+                          title="Remove image"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {(selectedMediaTab === 'audio' || selectedMediaTab === 'several') && (
+                  <div className="media-input-group">
+                    <label className="media-label">Audio</label>
+                    <div className="media-controls">
+                      <input
+                        type="url"
+                        placeholder="Enter audio URL..."
+                        className="media-url-input"
+                        onChange={(e) => setEditedQuestion(prev => ({ ...prev, audio_url: e.target.value }))}
+                        value={editedQuestion.audio_url?.startsWith('data:') ? '' : (editedQuestion.audio_url || '')}
+                      />
+                      <input
+                        type="file"
+                        accept="audio/*"
+                        onChange={(e) => handleAudioChange(e)}
+                        style={{ display: 'none' }}
+                        id="jeopardy-question-audio"
+                      />
+                      <label htmlFor="jeopardy-question-audio" className="media-upload-btn">
+                        🎵 Upload
+                      </label>
+                    </div>
+                    {editedQuestion.audio_url && (
+                      <div className="media-preview">
+                        <audio controls src={resolveMediaUrl(editedQuestion.audio_url)} className="question-preview-audio" />
+                        <button
+                          type="button"
+                          className="media-delete-btn"
+                          onClick={() => setEditedQuestion(prev => ({ ...prev, audio_url: undefined }))}
+                          title="Remove audio"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {editedQuestion.type === 'multiple_choice' && (
+            <div className="answers-section">
+              <div className="answers-header">
+                <h3>Answer Options</h3>
+                <button className="add-answer-btn" onClick={addAnswer}>
+                  + Add Answer
+                </button>
+              </div>
+
+              <div className="answers-list">
+                {editedQuestion.answers?.map((answer, index) => (
+                  <AnswerEditor
+                    key={index}
+                    answer={answer}
+                    index={index}
+                    questionType={editedQuestion.type}
+                    onChange={(updatedAnswer) => updateAnswer(index, updatedAnswer)}
+                    onDelete={() => deleteAnswer(index)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {editedQuestion.type === 'short_answer' && (
+            <div className="correct-answer-section">
+              <div className="form-group">
+                <label htmlFor="jeopardy-correct-answer">Correct Answer</label>
+                <input
+                  id="jeopardy-correct-answer"
+                  type="text"
+                  value={editedQuestion.correct_answer || ''}
+                  onChange={(e) => setEditedQuestion(prev => ({ ...prev, correct_answer: e.target.value }))}
+                  placeholder="Enter the correct answer..."
+                  className="correct-answer-input"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="points-section">
+            <label>Points</label>
             <input
-              type="text"
-              value={editedQuestion.answers?.[0]?.answer || ''}
-              onChange={(e) => setEditedQuestion(prev => ({
-                ...prev,
-                answers: [{
-                  ...prev.answers![0],
-                  answer: e.target.value
-                }]
-              }))}
-              placeholder="What is... [answer]?"
-              className="answer-input"
+              type="number"
+              value={editedQuestion.points || 10}
+              onChange={(e) => setEditedQuestion(prev => ({ ...prev, points: parseInt(e.target.value) }))}
+              className="points-input"
             />
-          </div>
-
-          <div className="jeopardy-tip">
-            <strong>💡 Jeopardy Tip:</strong> Questions should be written as answers,
-            and contestants must respond in the form of a question.
-            For example: Question: "This planet is known as the Red Planet"
-            Answer: "What is Mars?"
           </div>
         </div>
 
         <div className="modal-actions">
-          <button onClick={onCancel} className="cancel-btn">Cancel</button>
-          <button
-            onClick={handleSave}
-            className="save-btn"
-            disabled={!editedQuestion.question.trim() || !editedQuestion.answers?.[0]?.answer.trim()}
-          >
+          <button className="cancel-btn" onClick={onCancel}>Cancel</button>
+          <button className="save-btn" onClick={handleSave} disabled={isSaveDisabled()}>
             Save Question
           </button>
         </div>
       </motion.div>
+    </div>
+  );
+};
+
+interface AnswerEditorProps {
+  answer: Answer;
+  index: number;
+  questionType: Question['type'];
+  onChange: (answer: Answer) => void;
+  onDelete: () => void;
+}
+
+const AnswerEditor: React.FC<AnswerEditorProps> = ({
+  answer,
+  index,
+  questionType,
+  onChange,
+  onDelete
+}) => {
+  return (
+    <div className="answer-editor">
+      {questionType === 'multiple_choice' && (
+        <>
+          <input
+            type="radio"
+            name="jeopardy-correct-answer"
+            checked={answer.is_correct}
+            onChange={(e) => onChange({ ...answer, is_correct: e.target.checked })}
+            className="correct-radio"
+          />
+          <input
+            type="text"
+            value={answer.answer}
+            onChange={(e) => onChange({ ...answer, answer: e.target.value })}
+            placeholder={`Answer option ${index + 1}`}
+            className="answer-input"
+          />
+        </>
+      )}
+      <button className="delete-answer-btn" onClick={onDelete}>×</button>
     </div>
   );
 };

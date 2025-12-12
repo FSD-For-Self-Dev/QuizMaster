@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { resolveMediaUrl } from '../api';
 import './QuestionCard.css';
 
 interface QuestionCardProps {
@@ -33,6 +34,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const imageUrl = resolveMediaUrl(question.image_url);
+  const audioUrl = resolveMediaUrl(question.audio_url);
 
   const handleAudioToggle = () => {
     if (currentAudioRef.current && !currentAudioRef.current.paused) {
@@ -41,9 +44,9 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
       currentAudioRef.current.currentTime = 0;
       currentAudioRef.current = null;
       setIsPlaying(false);
-    } else {
+    } else if (audioUrl) {
       // Audio is not playing, so start playing
-      const audio = new Audio(question.audio_url);
+      const audio = new Audio(audioUrl);
       currentAudioRef.current = audio;
 
       audio.addEventListener('ended', () => {
@@ -94,6 +97,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     return question.answers.filter(answer => answer.is_correct).length;
   };
 
+  const hasText = !!question.question?.trim();
+
   return (
     <motion.div
       className="question-card"
@@ -134,19 +139,19 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
       </div>
 
       <div className="card-content">
-        <div className="question-text">
-          {question.question || 'No question text...'}
+        <div className={`question-text ${hasText ? '' : 'question-text-empty'}`}>
+          {hasText ? question.question : 'No question text...'}
         </div>
 
         {/* Media Display */}
-        {(question.image_url || question.audio_url) && (
+        {(imageUrl || audioUrl) && (
           <div className="question-media">
-            {question.image_url && (
+            {imageUrl && (
               <div className="media-item">
-                <img src={question.image_url} alt="Question media" className="question-image" />
+                <img src={imageUrl} alt="Question media" className="question-image" />
               </div>
             )}
-            {question.audio_url && (
+            {audioUrl && (
               <div className="media-item">
                 <div
                   className={`question-audio-thumbnail ${isPlaying ? 'playing' : ''}`}

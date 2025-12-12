@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, Text, DateTime, Integer
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 
 from app.models.base import Base
 
@@ -14,3 +15,17 @@ class Quiz(Base):
     settings = Column(Text, nullable=True)  # JSON string for quiz settings
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    questions = relationship(
+        "Question",
+        back_populates="quiz",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    rooms = relationship(
+        "Room",
+        back_populates="quiz",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )

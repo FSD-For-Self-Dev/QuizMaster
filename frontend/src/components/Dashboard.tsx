@@ -14,30 +14,13 @@ export const Dashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  // Track locally deleted quiz IDs
-  const [locallyDeletedIds, setLocallyDeletedIds] = useState<Set<string>>(() => {
-    try {
-      const stored = localStorage.getItem('locallyDeletedQuizzes');
-      return stored ? new Set(JSON.parse(stored)) : new Set();
-    } catch {
-      return new Set();
-    }
-  });
-
-  // Persist locally deleted IDs to localStorage
-  React.useEffect(() => {
-    localStorage.setItem('locallyDeletedQuizzes', JSON.stringify(Array.from(locallyDeletedIds)));
-  }, [locallyDeletedIds]);
-
   useEffect(() => {
     const fetchRecentQuizzes = async () => {
       try {
         setLoading(true);
         setError(null);
         const quizzes = await api.getQuizzes();
-        // Filter out locally deleted quizzes
-        const filteredQuizzes = quizzes.filter(quiz => quiz.id && !locallyDeletedIds.has(quiz.id));
-        setRecentQuizzes(filteredQuizzes.slice(0, 6)); // Show only the 6 most recent
+        setRecentQuizzes(quizzes);
       } catch (err) {
         console.error('Failed to fetch quizzes:', err);
         setError('Failed to load recent quizzes');
@@ -47,7 +30,7 @@ export const Dashboard: React.FC = () => {
     };
 
     fetchRecentQuizzes();
-  }, [locallyDeletedIds]);
+  }, []);
 
   const handleCreateQuiz = (type: 'classic' | 'jeopardy') => {
     // For now, navigate to editor with type selection
@@ -77,16 +60,7 @@ export const Dashboard: React.FC = () => {
         console.error('Failed to delete quiz:', error);
         console.error('Quiz data:', quiz);
 
-        // Temporary workaround for development - mark as locally deleted
-        console.warn('Backend not available - marking quiz as locally deleted');
-        const newDeletedIds = new Set(locallyDeletedIds);
-        newDeletedIds.add(quiz.id!);
-        setLocallyDeletedIds(newDeletedIds);
-        localStorage.setItem('locallyDeletedQuizzes', JSON.stringify(Array.from(newDeletedIds)));
-
-        setRecentQuizzes(prev => prev.filter(q => q.id !== quiz.id));
-        setOpenMenuId(null);
-        alert(`Quiz "${quiz.title}" removed from local list (backend not available)`);
+        alert(`Backend not available`);
       }
     }
   };
@@ -183,7 +157,7 @@ export const Dashboard: React.FC = () => {
                   </div>
                   <div className="quiz-card-content">
                     <div className="title-row">
-                      <h3 className="quiz-title">{quiz.title}</h3>
+                      <h3 className="quiz-card-title">{quiz.title}</h3>
                       <div className="menu-container">
                         <button className="menu-btn" onClick={(e) => { e.stopPropagation(); toggleMenu(quiz.id!); }}>
                           ⋮
@@ -202,7 +176,7 @@ export const Dashboard: React.FC = () => {
                     </p>
                     <div className="quiz-stats">
                       <span className="quiz-questions">
-                        Questions: {quiz.questions?.length || 0}
+                        Questions: {quiz.questions_count || 0}
                       </span>
                     </div>
                   </div>

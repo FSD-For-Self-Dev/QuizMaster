@@ -65,6 +65,28 @@
   flex-shrink: 0;
 }
 
+.edit-meta-btn {
+  padding: 10px 18px;
+  border-radius: 20px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.9rem;
+}
+
+.edit-meta-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.edit-meta-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .cancel-btn, .save-btn {
   padding: 14px 28px;
   border-radius: 25px;
@@ -116,6 +138,23 @@
   margin-bottom: 30px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.quiz-meta-editor {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(15px);
+  border-radius: 20px;
+  padding: 24px 24px 20px;
+  margin-bottom: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.quiz-meta-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 10px;
 }
 
 .form-group {

@@ -36,7 +36,9 @@ export interface Question {
   points?: number;
   order_index: number;
   answers?: Answer[];
+  image?: File | Blob | null;
   image_url?: string;
+  audio?: File | Blob | null;
   audio_url?: string;
   correct_answer?: string;
 }
@@ -57,7 +59,7 @@ interface QuizEditorProps {
   isSaving?: boolean;
 }
 
-export const QuizEditor: React.FC<QuizEditorProps> = ({ quiz, onSave, onCancel, isSaving = false }) => {
+export const QuizEditor: React.FC<QuizEditorProps> = ({ quiz, onSave, onCancel }) => {
   const [currentQuiz, setCurrentQuiz] = useState<Quiz>(quiz || {
     title: '',
     description: '',
@@ -75,6 +77,9 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quiz, onSave, onCancel, 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [showTypeSelector, setShowTypeSelector] = useState(!quiz);
   const [loading, setLoading] = useState(false);
+  const [isEditingMeta, setIsEditingMeta] = useState(false);
+  const [editTitle, setEditTitle] = useState(currentQuiz.title);
+  const [editDescription, setEditDescription] = useState(currentQuiz.description || '');
 
   // Load questions for existing quiz
   useEffect(() => {
@@ -89,6 +94,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quiz, onSave, onCancel, 
             quizQuestions.map(async (question) => {
               try {
                 const answers = await api.getAnswersByQuestion(question.id!);
+                console.log('???', question, answers)
                 return { ...question, answers };
               } catch (error) {
                 console.warn(`Failed to load answers for question ${question.id}:`, error);
@@ -109,6 +115,22 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quiz, onSave, onCancel, 
     }
   }, [quiz]);
 
+  useEffect(() => {
+    return () => {
+      questions.forEach((q) => {
+        if (q.audio_url?.startsWith("blob:")) {
+          URL.revokeObjectURL(q.audio_url);
+        }
+      });
+    };
+  }, [questions]);
+
+  // Keep local edit fields in sync with current quiz meta
+  useEffect(() => {
+    setEditTitle(currentQuiz.title);
+    setEditDescription(currentQuiz.description || '');
+  }, [currentQuiz.title, currentQuiz.description]);
+
   const handleQuizTypeSelect = (type: 'classic' | 'jeopardy', title: string, description: string) => {
     setCurrentQuiz(prev => ({
       ...prev,
@@ -119,47 +141,127 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quiz, onSave, onCancel, 
     setShowTypeSelector(false);
   };
 
-  const handleSave = () => {
-    // Validate quiz data before saving
-    if (!currentQuiz.title?.trim()) {
-      alert('Please provide a title for the quiz');
-      return;
-    }
+  const uploadAudio = async (audioBlob: Blob): Promise<string> => {
+    const formData = new FormData();
+    formData.append("file", audioBlob);
 
-    // Validate questions
-    for (let i = 0; i < questions.length; i++) {
-      const question = questions[i];
+    const { url } = await api.uploadAudio(formData);
+    return url;
+  };
 
-      if (!question.question?.trim()) {
-        alert(`Question ${i + 1} is missing text`);
+  const uploadImage = async (file: File | Blob): Promise<string> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const { url } = await api.uploadImage(formData);
+    return url;
+  };
+
+  const [isSaving, setIsSaving] = useState(false);
+
+  const [_, setUploadStatus] = useState<string | null>(null);
+
+  const handleMetaSave = () => {
+    setCurrentQuiz(prev => ({
+      ...prev,
+      title: editTitle.trim() || prev.title,
+      description: editDescription,
+    }));
+    setIsEditingMeta(false);
+  };
+
+  const handleSave = async () => {
+    try {
+      setIsSaving(true);
+
+      // Validate quiz data before saving
+      if (!currentQuiz.title?.trim()) {
+        alert('Please provide a title for the quiz');
         return;
-      }
+      };
 
-      // Validate based on question type
-      if (question.type === 'multiple_choice') {
-        if (!question.answers || question.answers.length === 0) {
-          alert(`Question ${i + 1} (Multiple Choice) needs at least one answer option`);
-          return;
-        }
-        if (!question.answers.some(answer => answer.is_correct)) {
-          alert(`Question ${i + 1} (Multiple Choice) needs at least one correct answer`);
-          return;
-        }
-      } else if (question.type === 'short_answer') {
-        if (!question.correct_answer?.trim()) {
-          alert(`Question ${i + 1} (Short Answer) needs a correct answer`);
-          return;
-        }
-      }
-    }
+      // Validate questions
+      for (let i = 0; i < questions.length; i++) {
+        const question = questions[i];
 
-    const quizToSave: Quiz = {
-      ...currentQuiz,
-      questions: questions
+        const hasText = !!question.question?.trim();
+        const hasMedia =
+          !!question.image_url ||
+          !!question.audio_url ||
+          !!question.image ||
+          !!question.audio;
+
+        // Require either text or some media (image/audio)
+        if (!hasText && !hasMedia) {
+          alert(`Question ${i + 1} must have text or an image/audio attachment`);
+          return;
+        }
+
+        // Validate based on question type
+        if (question.type === 'multiple_choice') {
+          if (!question.answers || question.answers.length === 0) {
+            alert(`Question ${i + 1} (Multiple Choice) needs at least one answer option`);
+            return;
+          }
+          if (!question.answers.some(answer => answer.is_correct)) {
+            alert(`Question ${i + 1} (Multiple Choice) needs at least one correct answer`);
+            return;
+          }
+        }
+      };
+
+      setUploadStatus("Uploading media...");
+
+      // Upload all media and collect updated questions
+      const uploadedQuestions = await Promise.all(
+        questions.map(async (question) => {
+          let updatedQuestion = { ...question };
+
+          // Upload audio if it's a File or Blob
+          if (question.audio && (question.audio instanceof File || question.audio instanceof Blob)) {
+            try {
+              const mediaUrl = await uploadAudio(question.audio);
+              updatedQuestion.audio_url = mediaUrl;
+              updatedQuestion.audio = undefined; // Remove local file
+            } catch (err) {
+              throw new Error(`Failed to upload audio for question: ${question.question || 'Unknown'}`);
+            }
+          }
+
+          // Upload image if it's a File or Blob
+          if (question.image && (question.image instanceof File || question.image instanceof Blob)) {
+            try {
+              const mediaUrl = await uploadImage(question.image);
+              updatedQuestion.image_url = mediaUrl;
+              updatedQuestion.image = undefined; // Remove local file
+            } catch (err) {
+              throw new Error(`Failed to upload image for question: ${question.question || 'Unknown'}`);
+            }
+          }
+
+          return updatedQuestion;
+        })
+      );
+
+      setUploadStatus("Saving quiz...");
+
+      // Save the quiz with uploaded media URLs
+      const quizToSave: Quiz = {
+        ...currentQuiz,
+        questions: uploadedQuestions,
+      };
+
+      console.log('Saving quiz:', quizToSave);
+      onSave(quizToSave);
+
+    } catch (err: any) {
+      console.error("Save failed:", err);
+      alert("Save failed: " + err.message);
+
+    } finally {
+      setIsSaving(false);
+      setUploadStatus(null); // Reset
     };
-
-    console.log('Saving quiz:', quizToSave);
-    onSave(quizToSave);
   };
 
   const handleQuestionReorder = (event: DragEndEvent) => {
@@ -185,7 +287,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quiz, onSave, onCancel, 
 
   if (showTypeSelector) {
     return <QuizTypeSelector onSelect={handleQuizTypeSelect} onCancel={onCancel} />;
-  }
+  };
 
   return (
     <div className="quiz-editor">
@@ -206,6 +308,16 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quiz, onSave, onCancel, 
             </div>
           </div>
           <div className="header-actions">
+              {quiz && quiz.id && (
+                <button
+                  className="edit-meta-btn"
+                  type="button"
+                  onClick={() => setIsEditingMeta(true)}
+                  disabled={isSaving}
+                >
+                  Edit title & description
+                </button>
+              )}
             <button className="cancel-btn" onClick={onCancel} disabled={isSaving}>
               Cancel
             </button>
@@ -222,6 +334,54 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quiz, onSave, onCancel, 
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5, delay: 0.2 }}
       >
+
+        {isEditingMeta && (
+          <div className="quiz-meta-editor">
+            <div className="form-group">
+              <label htmlFor="quiz-title-edit">Quiz Title</label>
+              <input
+                id="quiz-title-edit"
+                className="glass-input"
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                placeholder="Enter quiz title..."
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="quiz-description-edit">Description</label>
+              <textarea
+                id="quiz-description-edit"
+                className="glass-textarea"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Enter quiz description..."
+                rows={3}
+              />
+            </div>
+            <div className="quiz-meta-actions">
+              <button
+                type="button"
+                className="cancel-btn"
+                onClick={() => {
+                  setIsEditingMeta(false);
+                  setEditTitle(currentQuiz.title);
+                  setEditDescription(currentQuiz.description || '');
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="save-btn"
+                onClick={handleMetaSave}
+                disabled={!editTitle.trim()}
+              >
+                Save details
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="settings-section">
           <h3>Quiz Settings</h3>

@@ -90,7 +90,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const loginWithGoogle = () => {
     // Redirect to Google OAuth
-    const backendUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+    const backendUrl = process.env.REACT_APP_API_URL || 'http://localhost:8080';
     window.location.href = `${backendUrl}/api/v1/auth/google`;
   };
 

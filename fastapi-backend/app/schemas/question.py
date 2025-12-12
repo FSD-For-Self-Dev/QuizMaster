@@ -10,7 +10,8 @@ class QuestionBase(BaseModel):
     type: str  # 'multiple_choice', 'true_false', 'short_answer', 'jeopardy'
     points: Optional[int] = None  # For jeopardy
     order_index: int
-    media_url: Optional[str] = None
+    image_url: Optional[str] = None
+    audio_url: Optional[str] = None
     media_type: Optional[str] = None  # 'image', 'audio', 'video'
 
 

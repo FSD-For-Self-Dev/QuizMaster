@@ -1,0 +1,544 @@
+/* Cooperate Setup Styles */
+.cooperate-setup {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+  color: white;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cooperate-container {
+  max-width: 1200px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(15px);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 40px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+/* Header */
+.setup-header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.setup-title {
+  font-size: 2.5rem;
+  font-weight: bold;
+  margin-bottom: 15px;
+  background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.setup-subtitle {
+  font-size: 1.1rem;
+  color: rgba(255, 255, 255, 0.8);
+  margin: 0;
+}
+
+/* Quiz Info */
+.quiz-info {
+  text-align: center;
+  margin-bottom: 40px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.quiz-title {
+  font-size: 1.8rem;
+  font-weight: 600;
+  margin-bottom: 15px;
+  color: white;
+}
+
+.quiz-meta {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.quiz-meta span {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.quiz-type {
+  color: #4ecdc4;
+  background: rgba(78, 205, 196, 0.2);
+}
+
+.quiz-questions {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.room-info {
+  color: #ffa500;
+  background: rgba(255, 165, 0, 0.2);
+}
+
+/* Setup Content */
+.setup-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+  margin-bottom: 40px;
+}
+
+.section-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 25px;
+  color: white;
+}
+
+/* Sharing Section */
+.sharing-section {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 15px;
+  padding: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.qr-section {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.qr-code-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 15px;
+}
+
+.qr-code {
+  width: 200px;
+  height: 200px;
+  border-radius: 15px;
+  background: white;
+  padding: 10px;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+  object-fit: contain;
+  vertical-align: middle;
+}
+
+.qr-placeholder {
+  width: 200px;
+  height: 200px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed rgba(255, 255, 255, 0.3);
+}
+
+.qr-spinner {
+  font-size: 2rem;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.qr-instructions {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0;
+}
+
+/* Sharing Links */
+.sharing-links {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.link-section, .pin-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.link-label, .pin-label {
+  font-size: 1rem;
+  font-weight: 500;
+  color: white;
+}
+
+.link-input-group, .pin-input-group {
+  display: flex;
+  gap: 10px;
+}
+
+.link-input, .pin-input {
+  flex: 1;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+  color: white;
+  font-size: 0.9rem;
+  font-family: monospace;
+}
+
+.link-input:focus, .pin-input:focus {
+  outline: none;
+  border-color: #4ecdc4;
+  box-shadow: 0 0 0 1px rgba(78, 205, 196, 0.4);
+}
+
+.copy-btn {
+  padding: 12px 16px;
+  background: rgba(78, 205, 196, 0.2);
+  border: 1px solid rgba(78, 205, 196, 0.5);
+  border-radius: 10px;
+  color: #4ecdc4;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 1.2rem;
+  min-width: 50px;
+}
+
+.copy-btn:hover {
+  background: rgba(78, 205, 196, 0.3);
+  transform: translateY(-2px);
+}
+
+.copy-btn.copied {
+  background: rgba(46, 213, 115, 0.3);
+  border-color: rgba(46, 213, 115, 0.5);
+  color: #2ed573;
+}
+
+.pin-instructions {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0;
+  font-style: italic;
+}
+
+/* Users Section */
+.users-section {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 15px;
+  padding: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.users-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.user-item {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 15px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.3s ease;
+}
+
+.user-item:hover {
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-2px);
+}
+
+.user-item.empty {
+  background: rgba(255, 255, 255, 0.03);
+  border-style: dashed;
+  opacity: 0.6;
+}
+
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(45deg, #4ecdc4, #45b7aa);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: white;
+  font-size: 1.2rem;
+}
+
+.avatar-placeholder.empty {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.user-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.username {
+  font-weight: 500;
+  color: white;
+}
+
+.username.empty {
+  color: rgba(255, 255, 255, 0.4);
+  font-style: italic;
+}
+
+.host-badge {
+  background: linear-gradient(45deg, #ffd700, #ffed4e);
+  color: #333;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  align-self: flex-start;
+}
+
+.spectator-badge {
+  background: linear-gradient(45deg, #800080, #4B0082);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  align-self: flex-start;
+}
+
+.join-time {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.6);
+  flex-shrink: 0;
+}
+
+/* Actions */
+.setup-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+
+.remove-host-btn {
+  padding: 12px 24px;
+  background: linear-gradient(45deg, #800080, #4B0082);
+  border: 1px solid rgba(128, 0, 128, 0.5);
+  border-radius: 25px;
+  color: white;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 15px rgba(128, 0, 128, 0.3);
+}
+
+.remove-host-btn:hover {
+  background: linear-gradient(45deg, #9370DB, #8A2BE2);
+  border-color: rgba(147, 112, 219, 0.7);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(128, 0, 128, 0.5);
+}
+
+.back-btn {
+  padding: 12px 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 25px;
+  color: white;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+}
+
+.back-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(78, 205, 196, 0.3);
+  transform: translateY(-2px);
+}
+
+.back-btn.secondary {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.leave-lobby-btn {
+  padding: 12px 24px;
+  background: rgba(255, 107, 107, 0.2);
+  border: 1px solid rgba(255, 107, 107, 0.5);
+  border-radius: 25px;
+  color: #ff6b6b;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+}
+
+.leave-lobby-btn:hover {
+  background: rgba(255, 107, 107, 0.3);
+  border-color: rgba(255, 107, 107, 0.7);
+  transform: translateY(-2px);
+}
+
+.start-quiz-btn {
+  padding: 15px 30px;
+  background: linear-gradient(45deg, #4ecdc4, #45b7aa);
+  border: none;
+  border-radius: 25px;
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(78, 205, 196, 0.4);
+}
+
+.start-quiz-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(78, 205, 196, 0.6);
+}
+
+.start-quiz-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: 0 4px 15px rgba(78, 205, 196, 0.2);
+}
+
+.waiting-message {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 15px 25px;
+  border-radius: 25px;
+  color: rgba(255, 255, 255, 0.8);
+  font-style: italic;
+  text-align: center;
+  flex: 1;
+}
+
+/* Loading and Error States */
+.loading-state, .error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  color: rgba(255, 255, 255, 0.7);
+  text-align: center;
+}
+
+.loading-spinner, .error-icon {
+  font-size: 4rem;
+  margin-bottom: 20px;
+  opacity: 0.6;
+}
+
+.loading-spinner {
+  animation: spin 1s linear infinite;
+}
+
+.loading-state p, .error-state h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .cooperate-setup {
+    padding: 15px;
+  }
+
+  .cooperate-container {
+    padding: 25px;
+  }
+
+  .setup-title {
+    font-size: 2rem;
+  }
+
+  .setup-content {
+    grid-template-columns: 1fr;
+    gap: 30px;
+  }
+
+  .quiz-meta {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .sharing-links {
+    gap: 15px;
+  }
+
+  .setup-actions {
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  .back-btn, .start-quiz-btn {
+    width: 100%;
+    max-width: 300px;
+  }
+
+  .waiting-message {
+    order: -1;
+  }
+}
+
+@media (max-width: 480px) {
+  .setup-title {
+    font-size: 1.8rem;
+  }
+
+  .quiz-title {
+    font-size: 1.5rem;
+  }
+
+  .section-title {
+    font-size: 1.3rem;
+  }
+
+  .qr-code, .qr-placeholder {
+    width: 150px;
+    height: 150px;
+  }
+
+  .link-input-group, .pin-input-group {
+    flex-direction: column;
+  }
+
+  .copy-btn {
+    align-self: stretch;
+  }
+}

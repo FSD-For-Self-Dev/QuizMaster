@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Header } from './components/Header';
+import { PublicHeader } from './components/PublicHeader';
 import { Dashboard } from './components/Dashboard';
 import { QuizEditor } from './components/QuizEditor';
 import { QuizPlayer } from './components/QuizPlayer';
+import { QuizModeSelector } from './components/QuizModeSelector';
+import { CooperateSetup } from './components/CooperateSetup';
+import { CooperativeQuizPlayer } from './components/CooperativeQuizPlayer';
+import { GuestUserSetup } from './components/GuestUserSetup';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
 import { api, Quiz } from './api';
@@ -15,6 +20,9 @@ import './App.css';
 const AppWithHeader: React.FC = () => {
   const quizContext = React.useContext(QuizContext);
   const { user, logout } = useAuth();
+  const location = useLocation();
+
+  const quizFromState = (location.state as any)?.quiz as Quiz | undefined;
 
   const handleLogout = () => {
     logout();
@@ -29,8 +37,21 @@ const AppWithHeader: React.FC = () => {
       <Header user={user} onLogout={handleLogout} />
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/editor" element={<QuizEditor onSave={handleSaveQuiz} onCancel={handleCancelQuiz} isSaving={isSaving} />} />
-        <Route path="/play" element={<QuizPlayer />} />
+        <Route
+          path="/editor"
+          element={
+            <QuizEditor
+              quiz={quizFromState}
+              onSave={handleSaveQuiz}
+              onCancel={handleCancelQuiz}
+              isSaving={isSaving}
+            />
+          }
+        />
+        <Route path="/play" element={<QuizModeSelector />} />
+        <Route path="/quiz" element={<QuizPlayer />} />
+        <Route path="/cooperate-setup" element={<CooperateSetup />} />
+        {/* <Route path="/cooperative-quiz" element={<CooperativeQuizPlayer />} /> */}
       </Routes>
     </>
   );
@@ -43,6 +64,16 @@ const LoginRoute: React.FC = () => {
     return <Navigate to="/" replace />;
   }
   return <Login />;
+};
+
+// Wrapper for public routes with simplified header
+const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  return (
+    <>
+      <PublicHeader />
+      {children}
+    </>
+  );
 };
 
 // Global state for quiz saving (needed by multiple components)
@@ -111,6 +142,15 @@ function App() {
         }
       }
 
+      // If this is an edit of an existing quiz, remove the old one first
+      if (quiz.id) {
+        try {
+          await api.deleteQuiz(quiz.id);
+        } catch (e) {
+          console.warn('Failed to delete old quiz before re-creating, continuing anyway:', e);
+        }
+      }
+
       const result = await api.saveCompleteQuiz(quiz);
 
       console.log('Quiz saved successfully:', result);
@@ -132,8 +172,8 @@ function App() {
       // Temporary workaround - simulate successful save
       console.warn('Backend not available - simulating successful save');
       setSaveMessage({
-        type: 'success',
-        text: `Quiz "${quiz.title}" saved locally with ${quiz.questions?.length || 0} questions! (Backend not available)`
+        type: 'error',
+        text: `Backend not available`
       });
 
       // Clear success message after 5 seconds
@@ -182,8 +222,31 @@ function App() {
 
             <Routes>
               {/* Public routes */}
-              <Route path="/login" element={<LoginRoute />} />
-              <Route path="/register" element={<Register />} />
+              <Route path="/login" element={
+                <PublicRoute>
+                  <LoginRoute />
+                </PublicRoute>
+              } />
+              <Route path="/register" element={
+                <PublicRoute>
+                  <Register />
+                </PublicRoute>
+              } />
+              <Route path="/join/:roomId" element={
+                <PublicRoute>
+                  <GuestUserSetup />
+                </PublicRoute>
+              } />
+              <Route path="/lobby/:roomId" element={
+                <PublicRoute>
+                  <CooperateSetup />
+                </PublicRoute>
+              } />
+              <Route path="/cooperative-quiz" element={
+                <PublicRoute>
+                  <CooperativeQuizPlayer />
+                </PublicRoute>
+              } />
 
               {/* Protected routes with header */}
               <Route

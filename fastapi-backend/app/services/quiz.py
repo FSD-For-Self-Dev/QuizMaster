@@ -1,9 +1,12 @@
-from sqlalchemy.orm import Session
 from typing import List, Optional
 import json
 from datetime import datetime
 
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+
 from app.models.quiz import Quiz
+from app.models.question import Question
 from app.schemas.quiz import QuizCreate
 
 
@@ -13,7 +16,7 @@ def create_quiz(db: Session, quiz: QuizCreate) -> Quiz:
     quiz_id = f"quiz_{datetime.now().timestamp()}_{quiz.title.replace(' ', '_')}"
 
     # Convert settings to JSON string
-    settings_json = json.dumps(quiz.settings.dict() if quiz.settings else {})
+    settings_json = json.dumps(quiz.settings.model_dump() if quiz.settings else {})
 
     db_quiz = Quiz(
         id=quiz_id,
@@ -31,7 +34,17 @@ def create_quiz(db: Session, quiz: QuizCreate) -> Quiz:
 
 def get_quizzes(db: Session, skip: int = 0, limit: int = 100) -> List[Quiz]:
     """Get all quizzes."""
-    return db.query(Quiz).offset(skip).limit(limit).all()
+    return (
+        db.query(
+            Quiz,
+            func.count(Question.id).label("questions_count")
+        )
+        .outerjoin(Question)
+        .group_by(Quiz.id)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 def get_quiz(db: Session, quiz_id: str) -> Optional[Quiz]:

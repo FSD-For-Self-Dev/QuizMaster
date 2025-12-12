@@ -10,6 +10,8 @@ from app.db.session import create_tables
 # Create database tables on startup
 create_tables()
 
+MAX_REQUEST_SIZE = 1024 * 1024 * 50  # 50 MB
+
 app = FastAPI(
     title="QuizMaster API",
     description="Backend API for QuizMaster quiz application",
@@ -26,6 +28,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+app.mount("/media", StaticFiles(directory="media"), name="media")
 
 # Include API routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
@@ -44,4 +48,8 @@ def health_check():
     return {"status": "ok"}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+    )
