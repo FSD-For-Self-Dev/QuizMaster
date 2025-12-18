@@ -7,7 +7,7 @@
 
 /* Header */
 .dashboard-header {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
@@ -804,4 +804,62 @@
     padding: 15px 25px;
     font-size: 1.1rem;
   }
+}
+
+/* Error State Title Style */
+.error-state h3 {
+  color: #ff6b6b;
+  margin-bottom: 10px;
+}
+
+/* Quiz Round Specific Styles */
+.quiz-round-btn {
+  background: linear-gradient(45deg, #28a745, #20c997);
+  box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+}
+
+.quiz-round-btn:hover {
+  box-shadow: 0 6px 20px rgba(40, 167, 69, 0.6);
+}
+
+.quiz-round-card {
+  border-left: 4px solid #28a745;
+}
+
+.quiz-round-card:hover {
+  border-color: rgba(40, 167, 69, 0.5);
+  box-shadow: 0 12px 40px rgba(40, 167, 69, 0.2);
+}
+
+.quiz-round-label {
+  color: #28a745;
+  background: rgba(40, 167, 69, 0.1);
+}
+
+.quiz-rounds-list {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.6);
+  font-style: italic;
+  line-height: 1.3;
+}
+
+.create-first-btn {
+  background: linear-gradient(45deg, #28a745, #20c997);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 25px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-top: 20px;
+  box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+}
+
+.create-first-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(40, 167, 69, 0.6);
 }

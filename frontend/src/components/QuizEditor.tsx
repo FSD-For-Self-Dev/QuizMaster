@@ -391,7 +391,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quiz, onSave, onCancel }
               <input
                 id="timeLimit"
                 type="number"
-                value={currentQuiz.settings.timeLimit || 30}
+                value={currentQuiz.settings.timeLimit}
                 onChange={(e) => setCurrentQuiz(prev => ({
                   ...prev,
                   settings: { ...prev.settings, timeLimit: parseInt(e.target.value) }

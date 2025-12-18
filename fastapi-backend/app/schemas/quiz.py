@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, ConfigDict, Field
 from typing import Optional, Dict, Any, Any
 from datetime import datetime
 import json
@@ -47,3 +47,25 @@ class QuizRead(QuizBase):
                 # If parsing fails, just ignore and return None
                 return None
         return v
+
+
+class QuizAvailable(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    description: str = ""
+    type: str
+    settings: Dict[str, Any] = Field(default_factory=dict)
+    questions_count: Optional[int] = None  # not required for "available" list
+
+    @field_validator("settings", mode="before")
+    def parse_settings(cls, v):
+        if v is None:
+            return {}
+        if isinstance(v, str):
+            v = v.strip()
+            return json.loads(v) if v else {}
+        if isinstance(v, dict):
+            return v
+        return dict(v)

@@ -511,21 +511,6 @@
   justify-content: flex-end;
 }
 
-/* Classic-like Participant Status block (same class names as CooperativeQuizPlayer.tsx) */
-.participant-status {
-  margin: 10px 0 12px;
-  padding: 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(233, 238, 246, 0.10);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.participant-status h3 {
-  margin: 0 0 10px 0;
-  font-weight: 900;
-  letter-spacing: 0.2px;
-}
-
 .status-list {
   display: flex;
   flex-direction: column;
@@ -975,7 +960,7 @@
 
 /* Participants Status block (Classic-like) */
 .participant-status {
-  margin: 12px 0 0;
+  margin: auto auto;
   padding: 12px;
   border-radius: 14px;
   border: 1px solid rgba(233, 238, 246, 0.10);

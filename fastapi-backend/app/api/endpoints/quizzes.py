@@ -66,6 +66,7 @@ def read_quiz_questions(quiz_id: str, db: Session = Depends(get_db)):
     """
     Get all questions for a specific quiz.
     """
+    print('???')
     # Ensure quiz exists (optional but nicer errors)
     db_quiz = get_quiz(db, quiz_id=quiz_id)
     if db_quiz is None:

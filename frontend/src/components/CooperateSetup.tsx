@@ -37,6 +37,9 @@ export const CooperateSetup: React.FC = () => {
   const locationRoomCode = navState.roomId ?? null;
   const initialQuiz = (navState.quiz || null) as Quiz | null;
 
+  const backendRoomId = (navState as any)?.backendRoomId ?? null;
+  const quizRound = (navState as any)?.quizRound ?? null;
+
   const [roomState, setRoomState] = useState<RoomState>({
     id: '',
     room: null,
@@ -70,11 +73,21 @@ export const CooperateSetup: React.FC = () => {
 
   const quiz = initialQuiz; // for rendering / navigation
 
+  console.log('Starting room initialization...', {
+    isJoining,
+    guestUser,
+    quiz,
+    quizRound,
+    backendRoomId,
+    locationRoomCode,
+  });
+
   // Refs
   const wsConnectionRef = useRef<WebSocket | null>(null);
   const isMountedRef = useRef<boolean>(true);
   const initializedRef = useRef<boolean>(false);
   const roomIdRef = useRef<string | null>(null); // backend room.id
+  const wsListenersCleanupRef = useRef<null | (() => void)>(null);
 
   // Track mount/unmount
   useEffect(() => {
@@ -123,6 +136,7 @@ export const CooperateSetup: React.FC = () => {
         guestUser,
         quiz,
         locationRoomCode,
+        backendRoomId,
       });
 
       try {
@@ -130,18 +144,11 @@ export const CooperateSetup: React.FC = () => {
 
         // --- Guest joining existing room ---
         if (isJoining && guestUser) {
-          console.log('Guest user joining room...');
           const targetRoomCode = locationRoomCode || roomCode;
-          console.log('Target room code:', targetRoomCode);
 
-          // 1) Get room by room_code (includes participants)
           const roomData = await api.getRoomByCode(targetRoomCode);
           if (cancelled || !isMountedRef.current) return;
 
-          console.log('Room data by code:', roomData);
-
-          // 2) Join via HTTP
-          console.log('Joining room via API...');
           const participant = await api.joinRoom({
             room_id: roomData.id,
             guest_name: guestUser.username,
@@ -150,17 +157,14 @@ export const CooperateSetup: React.FC = () => {
           });
           if (cancelled || !isMountedRef.current) return;
 
-          console.log('Successfully joined room:', participant);
-
-          // 3) Connect WebSocket for real-time updates
-          console.log('Setting up WebSocket connection for guest...');
           const ws = api.connectToRoomWebSocket(roomData.id);
           wsConnectionRef.current = ws;
           roomIdRef.current = roomData.id;
 
-          setupWebSocketListeners(ws, roomData.id, guestUser);
+          // REMOVE old listeners (if any) and ATTACH new ones
+          wsListenersCleanupRef.current?.();
+          wsListenersCleanupRef.current = setupWebSocketListeners(ws, roomData.id, guestUser);
 
-          // 4) Optimistically update state, ensuring we include this participant
           if (cancelled || !isMountedRef.current) return;
 
           setRoomState(prev => {
@@ -184,55 +188,34 @@ export const CooperateSetup: React.FC = () => {
           setRoomCode(roomData.room_code);
           setPin(roomData.pin_code);
           setShareLink(`${window.location.origin}/join/${roomData.room_code}`);
-
           return;
         }
 
-        // --- Host creating a new room ---
-        if (!isJoining && quiz) {
-          console.log('Host creating new room for quiz:', quiz.id);
-
-          // 1) Create room
-          const roomData = await api.createRoom({
-            quiz_id: quiz.id!,
-            max_players: 50,
-          });
+        // --- Host opening an EXISTING room (e.g. Play Round created it already) ---
+        if (!isJoining && backendRoomId) {
+          const roomData = await api.getRoom(backendRoomId);
           if (cancelled || !isMountedRef.current) return;
-          console.log('Room created:', roomData);
 
-          // 2) Update display code, pin, share link
           setRoomCode(roomData.room_code);
           setPin(roomData.pin_code);
           setShareLink(`${window.location.origin}/join/${roomData.room_code}`);
 
-          // 3) Connect WebSocket (do NOT block the UI on this)
-          console.log('Setting up WebSocket for host...');
           let ws: WebSocket | null = null;
           try {
             ws = api.connectToRoomWebSocket(roomData.id);
             wsConnectionRef.current = ws;
             roomIdRef.current = roomData.id;
-            setupWebSocketListeners(ws, roomData.id, null);
+
+            wsListenersCleanupRef.current?.();
+            wsListenersCleanupRef.current = setupWebSocketListeners(ws, roomData.id, null);
           } catch (error) {
             console.warn('WebSocket connection failed, continuing without it:', error);
           }
 
-          // 4) Immediately show a stub room; WS "room_state" will refine it later
-          if (cancelled || !isMountedRef.current) return;
-
-          const stubRoom: RoomWithParticipants = {
-            ...roomData,
-            quiz_title: quiz.title,
-            quiz_description: quiz.description,
-            quiz_type: quiz.type,
-            quiz_questions_count: quiz.questions_count || 0,
-            participants: [], // host participant will appear after first "room_state"
-          };
-
           setRoomState({
             id: roomData.id,
-            room: stubRoom,
-            loading: false,    // IMPORTANT: stop the spinner here
+            room: roomData,
+            loading: false,
             error: null,
             wsConnection: ws,
             currentParticipantId: null,
@@ -241,57 +224,86 @@ export const CooperateSetup: React.FC = () => {
           return;
         }
 
-        // --- Guest opening join page without quiz, needs room by code ---
-        if (isJoining && !guestUser) {
-          console.log('Guest accessing room directly (no guestUser in state).');
+        // --- Host creating a new room ---
+        if (!isJoining && quiz) {
+          const roomData = await api.createRoom({
+            quiz_id: quiz.id!,
+            max_players: 50,
+          });
+          if (cancelled || !isMountedRef.current) return;
 
+          setRoomCode(roomData.room_code);
+          setPin(roomData.pin_code);
+          setShareLink(`${window.location.origin}/join/${roomData.room_code}`);
+
+          let ws: WebSocket | null = null;
+          try {
+            ws = api.connectToRoomWebSocket(roomData.id);
+            wsConnectionRef.current = ws;
+            roomIdRef.current = roomData.id;
+
+            wsListenersCleanupRef.current?.();
+            wsListenersCleanupRef.current = setupWebSocketListeners(ws, roomData.id, null);
+          } catch (error) {
+            console.warn('WebSocket connection failed, continuing without it:', error);
+          }
+
+          if (cancelled || !isMountedRef.current) return;
+
+          const stubRoom: RoomWithParticipants = {
+            ...roomData,
+            quiz_title: quiz.title,
+            quiz_description: quiz.description,
+            quiz_type: quiz.type,
+            quiz_questions_count: quiz.questions_count || 0,
+            participants: [],
+          };
+
+          setRoomState({
+            id: roomData.id,
+            room: stubRoom,
+            loading: false,
+            error: null,
+            wsConnection: ws,
+            currentParticipantId: null,
+          });
+
+          return;
+        }
+
+        // --- Guest opening join page without guestUser ---
+        if (isJoining && !guestUser) {
           const targetRoomCode = locationRoomCode || roomCode;
-          console.log('Trying to get room by code:', targetRoomCode);
+
+          const roomData = await api.getRoomByCode(targetRoomCode);
+          if (cancelled || !isMountedRef.current) return;
 
           try {
-            const roomData = await api.getRoomByCode(targetRoomCode);
+            const ws = api.connectToRoomWebSocket(roomData.id);
+            wsConnectionRef.current = ws;
+            roomIdRef.current = roomData.id;
+
+            wsListenersCleanupRef.current?.();
+            wsListenersCleanupRef.current = setupWebSocketListeners(ws, roomData.id, null);
+
             if (cancelled || !isMountedRef.current) return;
 
-            console.log('Direct access room data:', roomData);
-
-            // Connect WebSocket (read-only guest, not yet joined via API)
-            try {
-              const ws = api.connectToRoomWebSocket(roomData.id);
-              wsConnectionRef.current = ws;
-              roomIdRef.current = roomData.id;
-              setupWebSocketListeners(ws, roomData.id, null);
-
-              if (cancelled || !isMountedRef.current) return;
-
+            setRoomState({
+              id: roomData.id,
+              room: roomData,
+              loading: false,
+              error: null,
+              wsConnection: ws,
+              currentParticipantId: null,
+            });
+          } catch (error) {
+            console.warn('WebSocket connection failed, continuing without it:', error);
+            if (!cancelled && isMountedRef.current) {
               setRoomState({
                 id: roomData.id,
                 room: roomData,
                 loading: false,
                 error: null,
-                wsConnection: ws,
-                currentParticipantId: null,
-              });
-            } catch (error) {
-              console.warn('WebSocket connection failed, continuing without it:', error);
-              if (!cancelled && isMountedRef.current) {
-                setRoomState({
-                  id: roomData.id,
-                  room: roomData,
-                  loading: false,
-                  error: null,
-                  wsConnection: null,
-                  currentParticipantId: null,
-                });
-              }
-            }
-          } catch (error) {
-            console.error('Failed to get room for direct access:', error);
-            if (!cancelled && isMountedRef.current) {
-              setRoomState({
-                id: targetRoomCode,
-                room: null,
-                loading: false,
-                error: 'Room not found',
                 wsConnection: null,
                 currentParticipantId: null,
               });
@@ -301,11 +313,9 @@ export const CooperateSetup: React.FC = () => {
           return;
         }
 
-        // --- Invalid state: navigate away ---
+        // --- Invalid state ---
         console.log('Invalid navigation state, redirecting to home');
-        if (!cancelled && isMountedRef.current) {
-          navigate('/');
-        }
+        if (!cancelled && isMountedRef.current) navigate('/');
       } catch (error) {
         console.error('Failed to initialize room:', error);
         if (!cancelled && isMountedRef.current) {
@@ -322,15 +332,19 @@ export const CooperateSetup: React.FC = () => {
 
     return () => {
       cancelled = true;
+
+      // Remove WS listeners attached by this component
+      wsListenersCleanupRef.current?.();
+      wsListenersCleanupRef.current = null;
+
+      // IMPORTANT:
+      // Do NOT disconnect here if you want to reuse the same WS across screens
+      // (lobby -> round intro -> cooperative player). Disconnect only on "Leave room".
+      //
+      // If you *do* want CooperateSetup to own the socket lifecycle, uncomment:
+      // if (roomIdRef.current) api.disconnectFromRoomWebSocket(roomIdRef.current);
     };
-  },
-  [
-    isJoining,
-    guestUsername,
-    quiz?.id,
-    navigate,
-    locationRoomCode,
-  ]);
+  }, [isJoining, guestUsername, quiz?.id, navigate, locationRoomCode, backendRoomId]);
 
   const setupWebSocketListeners = (
     wsConnection: WebSocket,
@@ -339,27 +353,24 @@ export const CooperateSetup: React.FC = () => {
   ) => {
     console.log('Setting up WebSocket listeners for room:', roomId);
 
-    wsConnection.onopen = () => {
-      console.log(
-        `✅ Connected to room WebSocket. Guest user: ${guest?.username ?? 'HOST / unknown'}`
-      );
+    const onOpen = () => {
+      console.log(`✅ Connected to room WebSocket. Guest user: ${guest?.username ?? 'HOST / unknown'}`);
       // NOTE: All joining/leaving is via REST.
-      // We do NOT send any custom "participant_joined" through WebSocket.
     };
 
-    wsConnection.onmessage = (event) => {
+    const onMessage = (event: MessageEvent) => {
       if (!isMountedRef.current) return;
 
       console.log('📨 WebSocket message received:', event.data);
       try {
-        const message = JSON.parse(event.data);
+        const message = JSON.parse(String(event.data));
         handleWebSocketMessage(message, guest);
       } catch (error) {
         console.error('❌ Failed to parse WebSocket message:', error);
       }
     };
 
-    wsConnection.onclose = (event) => {
+    const onClose = (event: CloseEvent) => {
       console.log('🔌 Disconnected from room WebSocket:', event.code, event.reason);
       if (isMountedRef.current) {
         setRoomState(prev => ({
@@ -369,8 +380,21 @@ export const CooperateSetup: React.FC = () => {
       }
     };
 
-    wsConnection.onerror = (error) => {
+    const onError = (error: Event) => {
       console.error('❌ WebSocket error:', error);
+    };
+
+    wsConnection.addEventListener('open', onOpen);
+    wsConnection.addEventListener('message', onMessage);
+    wsConnection.addEventListener('close', onClose);
+    wsConnection.addEventListener('error', onError);
+
+    // IMPORTANT: return cleanup so we can remove listeners on unmount/navigation
+    return () => {
+      wsConnection.removeEventListener('open', onOpen);
+      wsConnection.removeEventListener('message', onMessage);
+      wsConnection.removeEventListener('close', onClose);
+      wsConnection.removeEventListener('error', onError);
     };
   };
 
@@ -578,6 +602,52 @@ export const CooperateSetup: React.FC = () => {
         break;
       }
 
+      case 'quiz_round_intro': {
+        // Payload expected:
+        // data: { room_id?: string, quiz_round_id: string, round_index?: number }
+        const current = roomStateRef.current;
+
+        const effectiveRoomId =
+          data?.room_id ||
+          current.id ||
+          navState?.roomId || // if you have it
+          null;
+
+        const quizRoundId = data?.quiz_round_id ?? null;
+        const roundIndex = Number(data?.round_index ?? 0);
+
+        if (!effectiveRoomId || !quizRoundId) {
+          console.error('Cannot navigate to QuizRoundPlayer: missing roomId or quizRoundId', {
+            effectiveRoomId,
+            quizRoundId,
+            data,
+          });
+          return;
+        }
+
+        const participants = current.room?.participants || [];
+        const effectiveParticipantId = current.currentParticipantId ?? null;
+
+        // Guests should follow host into the round intro screen
+        if (isJoining) {
+          navigate('/quiz-round-player', {
+            state: {
+              roomId: effectiveRoomId,
+              quizRoundId,
+              roundIndex: Number.isFinite(roundIndex) ? roundIndex : 0,
+              isHost: false,
+              currentParticipantId: effectiveParticipantId,
+              participants,
+            },
+          });
+        }
+
+        // If you also want the host to respond to the WS message (optional),
+        // remove the `if (isJoining)` guard and pass isHost accordingly.
+
+        break;
+      }
+
       default:
         console.log('Unhandled WebSocket message type:', type, data);
     }
@@ -621,8 +691,49 @@ export const CooperateSetup: React.FC = () => {
   const handleStartQuiz = () => {
     if (!roomState.room || roomState.room.status !== 'waiting') return;
 
-    // Find host participant id (host can also play)
+    // If you already keep quizRound in navState, read it here:
+    const quizRound = (navState as any)?.quizRound ?? null; // ideally type this
+
     const hostParticipant = roomState.room.participants.find(p => p.is_host);
+
+    // ===== ROUND FLOW =====
+    if (quizRound?.id) {
+      // 1) Broadcast: move everyone to round intro screen
+      if (roomState.wsConnection) {
+        const payload = {
+          type: 'quiz_round_intro',
+          data: {
+            room_id: roomState.id,
+            quiz_round_id: quizRound.id,
+            round_index: 0,
+          },
+          timestamp: new Date().toISOString(),
+        };
+
+        try {
+          roomState.wsConnection.send(JSON.stringify(payload));
+        } catch (e) {
+          console.error('Failed to send quiz_round_intro:', e);
+        }
+      }
+
+      // 2) Host navigates to round intro (QuizRoundPlayer)
+      navigate('/quiz-round-player', {
+        state: {
+          roomId: roomState.id,
+          quizRoundId: quizRound.id,
+          quizRound,             // host can pass full object; guests can fetch by id
+          roundIndex: 0,
+          isHost: true,
+          currentParticipantId: hostParticipant?.id ?? null,
+          participants: roomState.room.participants,
+        },
+      });
+
+      return;
+    }
+
+    // ===== SINGLE-QUIZ FLOW (your existing logic) =====
 
     // 1) Broadcast start over WebSocket so guests can navigate too
     if (roomState.wsConnection) {
@@ -637,6 +748,7 @@ export const CooperateSetup: React.FC = () => {
           room_id: roomState.id,
           quiz_id: roomState.room.quiz_id,
         },
+        timestamp: new Date().toISOString(),
       };
 
       try {

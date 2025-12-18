@@ -2,7 +2,7 @@
 .App {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   min-height: 100vh;
-  padding-top: 80px; /* Account for fixed header */
+  padding-top: 112px; /* Account for fixed header */
   background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
 }
 

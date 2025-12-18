@@ -9,12 +9,19 @@ import {
 } from '../api';
 import './CooperativeJeopardyPlayer.css';
 
+type RoundContext = {
+  quizRoundId: string;
+  roundIndex: number;
+  returnTo?: string; // e.g. '/quiz-round-player'
+};
+
 type LocationState = {
   roomId: string;
   quiz: Quiz;
   isHost: boolean;
   currentParticipantId: string | null;
   participants: RoomParticipant[];
+  roundContext?: RoundContext; // <-- OPTIONAL
 };
 
 type JeopardyChooser = {
@@ -48,6 +55,11 @@ type ResultsPayload = {
 
 type FinalPayload = {
   final_ratings: RatingRow[];
+};
+
+type CooperativeJeopardyPlayerProps = Partial<LocationState> & {
+  embedded?: boolean;
+  onRoundFinished?: (finalRatings: RatingRow[]) => void;
 };
 
 function safeJsonParse(raw: string): any | null {
@@ -150,12 +162,13 @@ function getParticipantAvatar(
   return ((p as any)?.guest_avatar as string | undefined) ?? null;
 }
 
-export const CooperativeJeopardyPlayer: React.FC = () => {
+export const CooperativeJeopardyPlayer: React.FC<CooperativeJeopardyPlayerProps> = (props) => {
   const location = useLocation();
   const navigate = useNavigate();
 
   const nav = useMemo(() => {
     const s = (location.state || {}) as Partial<LocationState>;
+    console.log('Location state received:', location.state);
     return {
       roomId: s.roomId ?? null,
       quiz: (s.quiz ?? null) as Quiz | null,
@@ -182,6 +195,45 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
   const [currentParticipantId, setCurrentParticipantId] = useState<string | null>(
     nav.currentParticipantId
   );
+
+  // Fallback: if currentParticipantId is null, try to get it from localStorage or participants
+  useEffect(() => {
+    if (!currentParticipantId && participants.length > 0) {
+      console.log('Fallback: trying to set currentParticipantId for', nav.isHost ? 'host' : 'participant');
+      
+      // For host, use host participant ID
+      if (nav.isHost) {
+        const hostParticipant = participants.find(p => p.is_host);
+        if (hostParticipant) {
+          console.log('Setting host participant ID:', hostParticipant.id);
+          setCurrentParticipantId(hostParticipant.id);
+          return;
+        }
+      } else {
+        // For non-host participants, try to get from localStorage first
+        const storedId = localStorage.getItem('currentParticipantId');
+        console.log('Found stored ID in localStorage:', storedId);
+        
+        if (storedId) {
+          const participant = participants.find(p => p.id === storedId && !p.is_host);
+          if (participant) {
+            console.log('Setting participant ID from localStorage:', participant.id);
+            setCurrentParticipantId(storedId);
+            return;
+          }
+        }
+        
+        // Fallback: use first non-host participant if no stored ID
+        const firstParticipant = participants.find(p => !p.is_host && p.is_active);
+        if (firstParticipant) {
+          console.log('Setting first active participant ID:', firstParticipant.id);
+          setCurrentParticipantId(firstParticipant.id);
+          localStorage.setItem('currentParticipantId', firstParticipant.id);
+          return;
+        }
+      }
+    }
+  }, [currentParticipantId, participants, nav.isHost]);
 
   const [hostParticipantId, setHostParticipantId] = useState<string | null>(null);
   useEffect(() => {
@@ -261,8 +313,9 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
 
   // Timer
   const [timeLimitSec, setTimeLimitSec] = useState<number>(20);
-  const [timeLeftSec, setTimeLeftSec] = useState<number>(0);
+  const [timeLeftSec, setTimeLeftSec] = useState<number>(20);
   const [questionOpen, setQuestionOpen] = useState(false);
+  const [timerInitialized, setTimerInitialized] = useState(false);
   const questionStartMsRef = useRef<number>(0);
 
   // Per-question answers
@@ -347,6 +400,7 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
     if (!questionOpen) return;
 
     setTimeLeftSec(timeLimitSec);
+    setTimerInitialized(true);
     const interval = window.setInterval(() => setTimeLeftSec(prev => prev - 1), 1000);
     return () => window.clearInterval(interval);
   }, [questionOpen, timeLimitSec]);
@@ -354,6 +408,7 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
   // Host: finalize -> results (accept snapshot to avoid last-answer race)
   const hostFinalizeToResults = useCallback(
     async (answersSnapshot?: Map<string, { answer_id: string; time_taken: number }>) => {
+      console.log('hostFinalizeToResults called!');
       if (!nav.isHost || !wsRef.current || !nav.roomId || !currentQuestion?.id) return;
 
       const active = getActivePlayersExcludingHost(participantsRef.current);
@@ -375,25 +430,21 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
         };
       });
 
-      const pts = Number((currentQuestion as any).points ?? 0);
-
+      // Compute ratings incrementally
       const nextTotals = new Map(totalsRef.current);
-      const ratings: RatingRow[] = active.map(p => {
-        const a = all_answers.find(x => x.participant_id === p.id)!;
-        const change = a.answer_id === 'NO_ANSWER' ? 0 : a.is_correct ? +pts : -pts;
-        const newTotal = (nextTotals.get(p.id) ?? 0) + change;
-        nextTotals.set(p.id, newTotal);
+      for (const a of all_answers) {
+        const pts = a.is_correct ? Number((currentQuestion as any).points ?? 0) : 0;
+        nextTotals.set(a.participant_id, (nextTotals.get(a.participant_id) ?? 0) + pts);
+      }
 
-        return {
-          participant_id: p.id,
-          participant_name: p.guest_name,
-          total_score: newTotal,
-          rating_change: change,
-        };
-      });
+      const ratings: RatingRow[] = active.map(p => ({
+        participant_id: p.id,
+        participant_name: p.guest_name,
+        total_score: nextTotals.get(p.id) ?? 0,
+        rating_change: 0,
+      }));
 
-      totalsRef.current = nextTotals;
-
+      const nextTotalsForRef = nextTotals;
       await api.sendCooperativeJeopardyQuestionResults(wsRef.current, nav.roomId, {
         question_id: currentQuestion.id!,
         all_answers,
@@ -412,7 +463,11 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
   useEffect(() => {
     if (!questionOpen) return;
     if (timeLeftSec > 0) return;
-    if (nav.isHost) void hostFinalizeToResults();
+    if (timeLeftSec === undefined || timeLeftSec === null) return;
+    if (nav.isHost) {
+      console.log('Auto-finalize triggered from timer expiry');
+      void hostFinalizeToResults();
+    }
   }, [timeLeftSec, questionOpen, nav.isHost, hostFinalizeToResults]);
 
   // Host: Continue -> reveal cell + pick next chooser OR end game (PREFERENCE: end on Continue)
@@ -449,6 +504,33 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
           timestamp: new Date().toISOString(),
         })
       );
+
+      // if launched from a round -> return to round screen
+      const rc = (nav as any).roundContext; // or nav.roundContext if typed
+      if (rc?.quizRoundId && typeof rc.roundIndex === 'number') {
+        // (optional) broadcast "round results" so guests can show rating too
+        wsRef.current?.send(
+          JSON.stringify({
+            type: 'quiz_round_results',
+            data: { final_ratings: finals },
+            timestamp: new Date().toISOString(),
+          })
+        );
+
+        navigate(rc.returnTo ?? '/quiz-round-player', {
+          replace: true,
+          state: {
+            roomId: nav.roomId,
+            quizRoundId: rc.quizRoundId,
+            roundIndex: rc.roundIndex,
+            isHost: nav.isHost,
+            currentParticipantId: nav.currentParticipantId ?? null,
+            participants: participantsRef.current,
+            finalRatings: finals,
+          },
+        });
+        return;
+      }
 
       setFinalRatings(finals);
       setStage('FINAL');
@@ -513,6 +595,7 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
   // Board: click cell -> start question
   const handleCellClick = useCallback(
     async (category: string, points: number) => {
+      console.log('Cell clicked:', { category, points, canPickCell, stage });
       if (!wsRef.current || !nav.roomId) return;
       if (!canPickCell) return;
       if (stage !== 'BOARD') return;
@@ -521,9 +604,16 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
       if (revealedCells.has(id)) return;
 
       const q = getQuestionByCategoryAndPoints(questions, category, points);
+      console.log('Found question:', q);
       if (!q) return;
 
       lastPickedCellRef.current = { category, points };
+
+      console.log('Sending cooperative_jeopardy_question_started with:', {
+        question: q,
+        time_limit: timeLimitSec,
+        cell: { category, points },
+      });
 
       await api.sendCooperativeJeopardyQuestionStarted(wsRef.current, nav.roomId, {
         question: q,
@@ -537,6 +627,7 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
   // Submit answer / skip
   const submitAnswer = useCallback(
     async (answerIdOrText: string) => {
+      console.log('Submitting answer:', answerIdOrText);
       if (!wsRef.current || !nav.roomId || !currentQuestion?.id || !currentParticipantId) return;
       if (!questionOpen) return;
       if (mySubmitted) return;
@@ -579,6 +670,26 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
     await submitAnswer('NO_ANSWER');
   }, [submitAnswer]);
 
+  // keep these refs somewhere near other refs:
+  const isHostRef = useRef<boolean>(!!nav.isHost);
+  useEffect(() => {
+    isHostRef.current = !!nav.isHost;
+  }, [nav.isHost]);
+
+  const currentQuestionRef = useRef<any>(currentQuestion);
+  useEffect(() => {
+    currentQuestionRef.current = currentQuestion;
+  }, [currentQuestion]);
+
+  // Only log render state when stage changes to avoid spam
+  const stageRef = useRef(stage);
+  useEffect(() => {
+    if (stageRef.current !== stage) {
+      console.log('Stage changed:', { from: stageRef.current, to: stage, currentParticipantId, questionOpen });
+      stageRef.current = stage;
+    }
+  }, [stage, currentParticipantId, questionOpen]);
+
   // WS connect & message handling
   useEffect(() => {
     if (!nav.roomId) return;
@@ -586,7 +697,7 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
     const ws = api.connectToRoomWebSocket(nav.roomId);
     wsRef.current = ws;
 
-    ws.onmessage = event => {
+    const onMessage = (event: MessageEvent) => {
       const msg = typeof event.data === 'string' ? safeJsonParse(event.data) : null;
       if (!msg) return;
 
@@ -602,12 +713,15 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
         }
 
         case 'cooperative_jeopardy_start': {
-          // board already visible
           break;
         }
 
         case 'cooperative_jeopardy_question_started': {
+          console.log('Received cooperative_jeopardy_question_started:', data);
           const q = data.question;
+          console.log('Question data:', q);
+          console.log('Current participants:', participants);
+          console.log('Active players (excluding host):', getActivePlayersExcludingHost(participants));
 
           const cell = data.cell;
           if (cell?.category && cell?.points) {
@@ -635,10 +749,12 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
           questionStartMsRef.current = Date.now();
           setQuestionOpen(true);
           setStage('QUESTION');
+          console.log('Stage set to QUESTION, currentQuestion:', q);
           break;
         }
 
         case 'cooperative_jeopardy_answer_submitted': {
+          console.log('Answer submitted:', data);
           const pid = data.participant_id as string | undefined;
           const answer_id = data.answer_id as string | undefined;
           const time_taken = Number(data.time_taken_ms ?? data.time_taken ?? 0);
@@ -648,18 +764,31 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
           now.set(pid, { answer_id, time_taken });
           participantAnswersRef.current = now;
           setParticipantAnswers(now);
+          console.log('Updated participantAnswers:', now);
 
-          // host: if all answered, finalize immediately (with snapshot)
-          if (nav.isHost && currentQuestion?.id) {
+          // host auto-finalize: use refs (no need for effect deps)
+          if (isHostRef.current && currentQuestionRef.current?.id) {
             const active = getActivePlayersExcludingHost(participantsRef.current);
             const allAnswered = active.length > 0 && active.every(p => now.has(p.id));
-            if (allAnswered) void hostFinalizeToResults(now);
+            console.log('Auto-finalize check:', { active, allAnswered, now });
+            if (allAnswered) {
+              console.log('Auto-finalize triggered from answer submission handler');
+              void hostFinalizeToResults(now);
+            }
           }
-
           break;
         }
 
         case 'cooperative_jeopardy_question_results': {
+          console.log('Received cooperative_jeopardy_question_results:', data);
+          console.log('Time since question started:', Date.now() - questionStartMsRef.current);
+          
+          // Ignore question results if received too quickly (within 1 second) - this indicates backend auto-finalization bug
+          if (Date.now() - questionStartMsRef.current < 1000) {
+            console.log('Ignoring question results - received too quickly, indicates backend auto-finalization bug');
+            return;
+          }
+          
           const payload = data as ResultsPayload;
 
           if (payload && Array.isArray(payload.all_answers) && Array.isArray(payload.ratings)) {
@@ -673,6 +802,7 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
 
           setQuestionOpen(false);
           setStage('RESULTS');
+          console.log('Stage set to RESULTS from question_results');
           break;
         }
 
@@ -721,11 +851,14 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
       }
     };
 
+    ws.addEventListener('message', onMessage);
+
     return () => {
-      api.disconnectFromRoomWebSocket(nav.roomId as string);
+      ws.removeEventListener('message', onMessage);
       wsRef.current = null;
+      // IMPORTANT: do NOT disconnect here (switching screens inside same room)
     };
-  }, [nav.roomId, nav.isHost, currentQuestion, hostFinalizeToResults, computeFinalRatings]);
+  }, [nav.roomId]);
 
   // Guard
   if (!nav.roomId || !quiz) return <Navigate to="/" replace />;
@@ -925,7 +1058,10 @@ export const CooperativeJeopardyPlayer: React.FC = () => {
                     </div>
 
                     {questionOpen && (
-                      <button className="cj-btn cj-btnDanger" onClick={() => void hostFinalizeToResults()}>
+                      <button className="cj-btn cj-btnDanger" onClick={() => {
+                        console.log('Auto-finalize triggered from manual End question button');
+                        void hostFinalizeToResults();
+                      }}>
                         End question
                       </button>
                     )}

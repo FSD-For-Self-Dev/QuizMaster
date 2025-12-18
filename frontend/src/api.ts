@@ -20,6 +20,35 @@ export interface Quiz {
   questions_count: number;
 }
 
+export interface QuizRoundItem {
+  id: string;
+  quiz_round_id: string;
+  quiz_id: string;
+  order_index: number;
+  created_at: string;
+  quiz_title: string;
+  quiz_type: string;
+  quiz_description?: string;
+}
+
+export interface QuizRound {
+  id?: string;
+  title: string;
+  description?: string;
+  created_at?: string;
+  updated_at?: string;
+  round_items: QuizRoundItem[];
+}
+
+export interface CreateQuizRoundRequest {
+  title: string;
+  description?: string;
+  round_items: Array<{
+    quiz_id: string;
+    order_index: number;
+  }>;
+}
+
 export interface QuizSettings {
   timeLimit?: number;
   randomizeQuestions?: boolean;
@@ -107,7 +136,13 @@ interface MediaResponse {
 // Room interfaces
 export interface Room {
   id: string;
-  quiz_id: string;
+
+  // Single quiz rooms:
+  quiz_id?: string | null;
+
+  // Quiz round rooms:
+  quiz_round_id?: string | null;
+
   room_code: string;
   pin_code: string;
   host_user_id: string;
@@ -140,7 +175,10 @@ export interface RoomWithParticipants extends Room {
 }
 
 export interface CreateRoomRequest {
-  quiz_id: string;
+  // Provide exactly ONE of these:
+  quiz_id?: string;
+  quiz_round_id?: string;
+
   max_players: number;
 }
 
@@ -160,41 +198,41 @@ class ApiService {
   private wsConnections: Map<string, WebSocket> = new Map();
 
   connectToRoomWebSocket(roomId: string): WebSocket {
-    const existingConnection = this.wsConnections.get(roomId);
-    if (existingConnection && existingConnection.readyState === WebSocket.OPEN) {
-      console.log('🔄 Reusing existing WebSocket connection for room:', roomId);
-      return existingConnection;
+    const existing = this.wsConnections.get(roomId);
+
+    if (
+      existing &&
+      (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)
+    ) {
+      console.log('🔄 Reusing existing WebSocket connection for room:', roomId, 'state:', existing.readyState);
+      return existing;
     }
 
-    const wsUrl = `${API_BASE_URL.replace('http', 'ws')}/api/v1/rooms/${roomId}/ws`;
+    const wsUrl = `${API_BASE_URL.replace(/^http/, 'ws')}/api/v1/rooms/${encodeURIComponent(roomId)}/ws`;
     console.log('🔗 Creating new WebSocket connection to:', wsUrl);
 
-    try {
-      const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl);
 
-      ws.onopen = () => console.log('✅ WebSocket connected to room:', roomId);
-      ws.onmessage = (event) => console.log('📨 WebSocket message received:', event.data);
-      ws.onerror = (error) => console.error('❌ WebSocket error:', error);
-      ws.onclose = (event) => {
-        console.log('🔌 WebSocket disconnected from room:', roomId, 'Code:', event.code, 'Reason:', event.reason);
-        if (this.wsConnections.get(roomId) === ws) this.wsConnections.delete(roomId);
-      };
+    ws.addEventListener('open', () => console.log('✅ WebSocket connected to room:', roomId));
+    ws.addEventListener('error', (error) => console.error('❌ WebSocket error:', error));
+    ws.addEventListener('close', (event) => {
+      console.log('🔌 WebSocket disconnected from room:', roomId, 'Code:', event.code, 'Reason:', event.reason);
+      if (this.wsConnections.get(roomId) === ws) this.wsConnections.delete(roomId);
+    });
 
-      this.wsConnections.set(roomId, ws);
-      return ws;
-    } catch (error) {
-      console.error('❌ Failed to create WebSocket connection:', error);
-      throw error;
-    }
+    this.wsConnections.set(roomId, ws);
+    return ws;
   }
 
   disconnectFromRoomWebSocket(roomId: string): void {
-    const connection = this.wsConnections.get(roomId);
-    if (connection) {
-      connection.close();
-      this.wsConnections.delete(roomId);
-      console.log('🔌 Manually disconnected WebSocket for room:', roomId);
-    }
+    const ws = this.wsConnections.get(roomId);
+    if (!ws) return;
+
+    this.wsConnections.delete(roomId);
+    try {
+      ws.close(1000, 'client disconnect');
+    } catch {}
+    console.log('🔌 Manually disconnected WebSocket for room:', roomId);
   }
 
   async sendWebSocketMessage(ws: WebSocket, message_type: string, message_data: any): Promise<void> {
@@ -258,6 +296,27 @@ class ApiService {
 
   async deleteQuiz(quizId: string): Promise<void> {
     return this.request(`/api/v1/quizzes/${quizId}`, { method: 'DELETE' });
+  }
+
+  // Quiz Round operations
+  async createQuizRound(roundData: CreateQuizRoundRequest): Promise<QuizRound> {
+    return this.request('/api/v1/quiz-rounds', { method: 'POST', body: JSON.stringify(roundData) });
+  }
+
+  async getQuizRounds(): Promise<QuizRound[]> {
+    return this.request('/api/v1/quiz-rounds');
+  }
+
+  async getQuizRound(roundId: string): Promise<QuizRound> {
+    return this.request(`/api/v1/quiz-rounds/${roundId}`);
+  }
+
+  async deleteQuizRound(roundId: string): Promise<void> {
+    return this.request(`/api/v1/quiz-rounds/${roundId}`, { method: 'DELETE' });
+  }
+
+  async getAvailableQuizzesForRound(): Promise<Quiz[]> {
+    return this.request('/api/v1/quiz-rounds/available-quizzes');
   }
 
   // Question operations
@@ -361,6 +420,10 @@ class ApiService {
     return this.request('/api/v1/rooms/', { method: 'POST', body: JSON.stringify(roomData) });
   }
 
+  async createRoomForQuizRound(quizRoundId: string, maxPlayers = 50): Promise<Room> {
+    return this.createRoom({ quiz_round_id: quizRoundId, max_players: maxPlayers });
+  }
+
   async getRoomByCode(roomCode: string): Promise<RoomWithParticipants> {
     return this.request(`/api/v1/rooms/code/${roomCode}`);
   }
@@ -440,6 +503,7 @@ class ApiService {
         total_score: number;
         rating_change: number;
       }>;
+      correct_answer_text?: string | null;
     }
   ): Promise<void> {
     return this.sendWebSocketMessage(ws, 'cooperative_question_results', { room_id: roomId, ...results });
@@ -561,7 +625,7 @@ class ApiService {
   async sendCooperativeJeopardyStart(
     ws: WebSocket,
     roomId: string,
-    payload: { quiz_data: any; categories: any } // categories can be string[] or full map
+    payload: { quiz_data: any; categories: any }
   ): Promise<void> {
     return this.sendWebSocketMessage(ws, 'cooperative_jeopardy_start', {
       room_id: roomId,
@@ -639,6 +703,10 @@ class ApiService {
     }
   ): Promise<void> {
     return this.sendWebSocketMessage(ws, 'cooperative_jeopardy_quiz_end', { room_id: roomId, ...finalResults });
+  }
+
+  async getQuiz(quizId: string): Promise<Quiz> {
+    return this.request(`/quizzes/${encodeURIComponent(quizId)}`);
   }
 }
 

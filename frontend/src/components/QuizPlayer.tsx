@@ -916,19 +916,6 @@ export const QuizPlayer: React.FC = () => {
         </div>
       )}
 
-      {/* Quiz Header */}
-      <motion.div
-        className="quiz-header"
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <h1 className="quiz-title">{quiz.title}</h1>
-        <div className="quiz-meta">
-          <span className="quiz-type">{quiz.type === 'classic' ? 'Classic Quiz' : 'Jeopardy'}</span>
-        </div>
-      </motion.div>
-
       {/* Question */}
       <AnimatePresence mode="wait">
         <motion.div
@@ -1034,19 +1021,6 @@ export const QuizPlayer: React.FC = () => {
               // Classic quiz navigation - with confirmation flow
               <>
                 <div className="classic-navigation">
-                  <div className="question-indicators">
-                    {questions.map((_, index) => (
-                      <div
-                        key={index}
-                        className={`question-indicator ${
-                          index === currentQuestionIndex ? 'active' :
-                          selectedAnswers[questions[index].id!] ? 'answered' : 'unanswered'
-                        }`}
-                        onClick={() => setCurrentQuestionIndex(index)}
-                      />
-                    ))}
-                  </div>
-                  
                   {showClassicVerdict && classicVerdict ? (
                     // Show verdict and next button
                     <div className="classic-verdict-display">

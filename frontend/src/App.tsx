@@ -7,6 +7,8 @@ import { PublicHeader } from './components/PublicHeader';
 import { Dashboard } from './components/Dashboard';
 import { QuizEditor } from './components/QuizEditor';
 import { QuizPlayer } from './components/QuizPlayer';
+import { QuizRoundEditor } from './components/QuizRoundEditor';
+import { QuizRoundPlayer } from './components/QuizRoundPlayer';
 import { QuizModeSelector } from './components/QuizModeSelector';
 import { CooperateSetup } from './components/CooperateSetup';
 import { CooperativeQuizPlayer } from './components/CooperativeQuizPlayer';
@@ -49,6 +51,8 @@ const AppWithHeader: React.FC = () => {
             />
           }
         />
+        <Route path="/quiz-round-editor" element={<QuizRoundEditor />} />
+        {/* <Route path="/quiz-round-player" element={<QuizRoundPlayer />} /> */}
         <Route path="/play" element={<QuizModeSelector />} />
         <Route path="/quiz" element={<QuizPlayer />} />
         <Route path="/cooperate-setup" element={<CooperateSetup />} />
@@ -253,6 +257,14 @@ function App() {
                   <CooperativeJeopardyPlayer />
                 </PublicRoute>
               } />
+              <Route
+                path="/quiz-round-player"
+                element={
+                  <PublicRoute>
+                    <QuizRoundPlayer />
+                  </PublicRoute>
+                }
+              />
 
               {/* Protected routes with header */}
               <Route

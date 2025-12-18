@@ -150,6 +150,15 @@ async def room_websocket_endpoint(
                 await send_room_update(room_id, msg_type, data)
                 continue
 
+            # Quiz round orchestration messages forwarded to all
+            if msg_type in {
+                "quiz_round_intro",
+                "quiz_round_results",
+                "quiz_round_next",
+            }:
+                await send_room_update(room_id, msg_type, data)
+                continue
+
             # Optional: ignore pings
             if msg_type in {"ping"}:
                 await send_to_sender(websocket, {"type": "pong", "data": {}, "timestamp": datetime.utcnow().isoformat()})

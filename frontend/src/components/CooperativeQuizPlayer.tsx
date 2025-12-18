@@ -19,12 +19,19 @@ interface ParticipantRating {
   rating_change: number;
 }
 
+interface RoundContext {
+  quizRoundId: string;
+  roundIndex: number;
+  returnTo?: string;
+}
+
 interface CooperativeLocationState {
   quiz: Quiz;
   roomId: string;
   isHost: boolean;
   currentParticipantId?: string;
   participants: RoomParticipant[];
+  roundContext?: RoundContext;
 }
 
 export const CooperativeQuizPlayer: React.FC = () => {
@@ -32,7 +39,7 @@ export const CooperativeQuizPlayer: React.FC = () => {
   const location = useLocation();
   const navState = (location.state || {}) as CooperativeLocationState;
 
-  const { quiz, roomId, isHost, currentParticipantId, participants } = navState;
+  const { quiz, roomId, isHost, currentParticipantId, participants, roundContext } = navState;
 
   // Quiz state
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -55,6 +62,7 @@ export const CooperativeQuizPlayer: React.FC = () => {
   const [questionResults, setQuestionResults] = useState<{
     answers: CooperativeAnswer[];
     ratings: ParticipantRating[];
+    correct_answer_text?: string | null;
   } | null>(null);
 
   // Timer state
@@ -79,51 +87,60 @@ export const CooperativeQuizPlayer: React.FC = () => {
 
   const QUESTION_DEFAULT_TIME = 30; // seconds, fallback
 
-  // Initialize WebSocket connection with error handling
+  // WebSocket: connect once per room, do NOT disconnect on unmount (room navigation)
   useEffect(() => {
     if (!roomId) {
       console.error('No room ID provided');
       return;
     }
 
-    let ws: WebSocket | null = null;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 3;
+    isMountedRef.current = true;
 
-    const handleConnectionError = () => {
-      if (reconnectAttempts < maxReconnectAttempts) {
-        reconnectAttempts++;
-        console.log(
-          `Attempting to reconnect... (${reconnectAttempts}/${maxReconnectAttempts})`
-        );
-        setTimeout(connectWebSocket, 2000 * reconnectAttempts);
-      } else {
-        console.error('Max reconnection attempts reached');
-      }
-    };
+    const ws = api.connectToRoomWebSocket(roomId);
+    wsRef.current = ws;
 
-    const connectWebSocket = () => {
+    const onMessage = (event: MessageEvent) => {
+      if (!isMountedRef.current) return;
+
+      const raw = typeof event.data === 'string' ? event.data : '';
+      if (!raw) return;
+
       try {
-        ws = api.connectToRoomWebSocket(roomId);
-        wsRef.current = ws;
-        setupWebSocketListeners(ws);
-        reconnectAttempts = 0;
+        const message = JSON.parse(raw);
+        handleWebSocketMessage(message);
       } catch (error) {
-        console.error('Failed to connect to WebSocket:', error);
-        handleConnectionError();
+        console.error('Failed to parse WebSocket message:', error);
       }
     };
 
-    connectWebSocket();
+    const onOpen = () => {
+      console.log('Connected to cooperative quiz WebSocket');
+    };
+
+    const onClose = () => {
+      console.log('Disconnected from cooperative quiz WebSocket');
+    };
+
+    const onError = (error: Event) => {
+      console.error('WebSocket error:', error);
+    };
+
+    ws.addEventListener('message', onMessage);
+    ws.addEventListener('open', onOpen);
+    ws.addEventListener('close', onClose);
+    ws.addEventListener('error', onError);
 
     return () => {
       isMountedRef.current = false;
-      if (roomId) {
-        api.disconnectFromRoomWebSocket(roomId);
-      }
-      if (ws) {
-        ws.close();
-      }
+
+      // IMPORTANT: only remove listeners; do NOT close/disconnect here
+      // because other screens in the same room may be using the same socket.
+      ws.removeEventListener('message', onMessage);
+      ws.removeEventListener('open', onOpen);
+      ws.removeEventListener('close', onClose);
+      ws.removeEventListener('error', onError);
+
+      wsRef.current = null;
     };
   }, [roomId]);
 
@@ -229,31 +246,6 @@ export const CooperativeQuizPlayer: React.FC = () => {
     allParticipantsRef.current = allParticipants;
   }, [allParticipants]);
 
-  const setupWebSocketListeners = (ws: WebSocket) => {
-    ws.onmessage = event => {
-      if (!isMountedRef.current) return;
-
-      try {
-        const message = JSON.parse(event.data);
-        handleWebSocketMessage(message);
-      } catch (error) {
-        console.error('Failed to parse WebSocket message:', error);
-      }
-    };
-
-    ws.onopen = () => {
-      console.log('Connected to cooperative quiz WebSocket');
-    };
-
-    ws.onclose = () => {
-      console.log('Disconnected from cooperative quiz WebSocket');
-    };
-
-    ws.onerror = error => {
-      console.error('WebSocket error:', error);
-    };
-  };
-
   const handleWebSocketMessage = (message: any) => {
     if (!isMountedRef.current) return;
 
@@ -280,14 +272,13 @@ export const CooperativeQuizPlayer: React.FC = () => {
         case 'cooperative_quiz_end':
           handleQuizEnd(data);
           break;
+        case 'quiz_round_next':
+          console.log('Guest received quiz_round_next message:', data);
+          handleQuizRoundNext(data);
+          break;
         case 'participant_joined':
         case 'participant_left':
           handleParticipantUpdate(type, data);
-          break;
-        case 'room_state':
-          if (data.participants) {
-            setAllParticipants(data.participants);
-          }
           break;
         default:
           console.log('Unhandled message type:', type, data);
@@ -430,6 +421,7 @@ export const CooperativeQuizPlayer: React.FC = () => {
     setQuestionResults({
       answers: data.all_answers,
       ratings: data.ratings,
+      correct_answer_text: data.correct_answer_text ?? null,
     });
 
     // Update participant ratings
@@ -447,6 +439,41 @@ export const CooperativeQuizPlayer: React.FC = () => {
   const handleQuizEnd = (data: any) => {
     console.log('Quiz ended:', data);
     setShowResults(true);
+  };
+
+  const handleQuizRoundNext = (data: any) => {
+    console.log('Quiz round next received:', data);
+    console.log('Guest navigation check:', {
+      isHost,
+      hasRoundContext: !!roundContext,
+      roundContext,
+      roomId
+    });
+    
+    // Navigate guests to the next round
+    if (!isHost && roundContext) {
+      console.log('Guest navigating to quiz-round-player with state:', {
+        quizRoundId: data.quizRoundId || roundContext.quizRoundId,
+        roundIndex: data.roundIndex || roundContext.roundIndex + 1,
+        isHost: false,
+        participants: allParticipants,
+        roomId: roomId
+      });
+      navigate('/quiz-round-player', {
+        state: {
+          quizRoundId: data.quizRoundId || roundContext.quizRoundId,
+          roundIndex: data.roundIndex || roundContext.roundIndex + 1,
+          isHost: false,
+          participants: allParticipants,
+          roomId: roomId
+        }
+      });
+    } else {
+      console.log('Guest navigation blocked:', {
+        isHost,
+        hasRoundContext: !!roundContext
+      });
+    }
   };
 
   // Handle participants joining/leaving during quiz
@@ -566,6 +593,20 @@ export const CooperativeQuizPlayer: React.FC = () => {
     }
   };
 
+  const computeCorrectAnswerText = (q: Question): string | null => {
+    if (!q) return null;
+
+    if (q.type === 'short_answer') {
+      const canonical =
+        q.correct_answer?.trim() ||
+        q.answers?.find(a => a.is_correct)?.answer?.trim();
+      return canonical || null;
+    }
+
+    const correct = q.answers?.find(a => a.is_correct);
+    return correct?.answer ?? null;
+  };
+
   const processQuestionResults = async () => {
     console.log(
       'processQuestionResults called, hasProcessedCurrentQuestionRef =',
@@ -632,6 +673,7 @@ export const CooperativeQuizPlayer: React.FC = () => {
     });
 
     const ratings = calculateRatings(correctedAnswers);
+    const correct_answer_text = computeCorrectAnswerText(currentQuestion);
 
     // Send results to all participants
     try {
@@ -639,6 +681,7 @@ export const CooperativeQuizPlayer: React.FC = () => {
         question_id: currentQuestion.id!,
         all_answers: correctedAnswers,
         ratings,
+        correct_answer_text,
       });
     } catch (error) {
       console.error('Failed to send question results:', error);
@@ -695,14 +738,54 @@ export const CooperativeQuizPlayer: React.FC = () => {
           });
       }
     } else {
-      // Quiz finished
-      void finishQuiz();
+      // Quiz finished - check if in round context
+      console.log('Quiz finished, roundContext:', roundContext);
+      if (roundContext) {
+        console.log('Navigating to quiz-round-player with state:', {
+          quizRoundId: roundContext.quizRoundId,
+          roundIndex: roundContext.roundIndex + 1,
+          isHost: true,
+          participants: allParticipants,
+          roomId: roomId
+        });
+        // Navigate back to QuizRoundPlayer for next round
+        navigate('/quiz-round-player', {
+          state: {
+            quizRoundId: roundContext.quizRoundId,
+            roundIndex: roundContext.roundIndex + 1,
+            isHost: true,
+            participants: allParticipants,
+            roomId: roomId
+          }
+        });
+
+        // Notify guests to navigate to next round
+        if (wsRef.current) {
+          const message = {
+            type: 'quiz_round_next',
+            data: {
+              quizRoundId: roundContext.quizRoundId,
+              roundIndex: roundContext.roundIndex + 1,
+            },
+            timestamp: new Date().toISOString(),
+          };
+          console.log('Host broadcasting quiz_round_next message:', message);
+          try {
+            wsRef.current.send(JSON.stringify(message));
+            console.log('quiz_round_next message sent successfully');
+          } catch (e) {
+            console.warn('Failed to broadcast next round navigation:', e);
+          }
+        }
+      } else {
+        console.log('No roundContext, calling finishQuiz');
+        void finishQuiz();
+      }
     }
   };
 
   const finishQuiz = async () => {
     if (!isHost) return;
-
     const finalResults = {
       participants: Array.from(participantRatings.values()).map(rating => ({
         participant_id: rating.participant_id,
@@ -830,9 +913,17 @@ export const CooperativeQuizPlayer: React.FC = () => {
             })}
           </div>
 
-          <button className="back-btn" onClick={handleBackToLobby}>
-            Back to Lobby
-          </button>
+          <div className="button-group">
+            {isHost && roundContext ? (
+              <button className="next-btn" onClick={handleNextQuestion}>
+                Next Round
+              </button>
+            ) : (
+              <button className="back-btn" onClick={handleBackToLobby}>
+                Back to Lobby
+              </button>
+            )}
+          </div>
         </motion.div>
       </div>
     );
@@ -847,6 +938,13 @@ export const CooperativeQuizPlayer: React.FC = () => {
           animate={{ opacity: 1, scale: 1 }}
         >
           <h2>Question {currentQuestionIndex + 1} Results</h2>
+
+          {questionResults.correct_answer_text && (
+            <div className="correct-answer-closeup">
+              <div className="correct-answer-label">The Correct Answer</div>
+              <div className="correct-answer-text">{questionResults.correct_answer_text}</div>
+            </div>
+          )}
 
           <div className="results-list">
             {questionResults.answers.map(a => {
@@ -863,7 +961,8 @@ export const CooperativeQuizPlayer: React.FC = () => {
 
               const isNoAnswer = a.answer_id === 'NO_ANSWER';
               const userAnswerText = getUserAnswerText(currentQuestion, a);
-              const correctAnswerText = getCorrectAnswerText(currentQuestion);
+              const correctAnswerText =
+                questionResults.correct_answer_text ?? computeCorrectAnswerText(currentQuestion);
 
               return (
                 <div
@@ -937,6 +1036,8 @@ export const CooperativeQuizPlayer: React.FC = () => {
             <button className="next-btn" onClick={handleNextQuestion}>
               {currentQuestionIndex < questions.length - 1
                 ? 'Next Question'
+                : roundContext
+                ? 'Next Round'
                 : 'Finish Quiz'}
             </button>
           )}
@@ -951,19 +1052,6 @@ export const CooperativeQuizPlayer: React.FC = () => {
 
   return (
     <div className="cooperative-quiz-player">
-      {/* Header */}
-      <div className="quiz-header">
-        <h1>{quiz.title}</h1>
-        <div className="quiz-meta">
-          <span className="question-counter">
-            Question {currentQuestionIndex + 1} of {questions.length}
-          </span>
-          <span className="participants-status">
-            {answeredCount}/{totalParticipants} answered
-          </span>
-        </div>
-      </div>
-
       {/* Timer */}
       {timerActive && timeRemaining > 0 && (
         <div className="quiz-timer">
