@@ -69,6 +69,9 @@ export const CooperativeQuizPlayer: React.FC = () => {
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
   const [timerActive, setTimerActive] = useState<boolean>(false);
 
+  // Intermediate rating stage state
+  const [showRoundRatings, setShowRoundRatings] = useState(false);
+
   // Rating tracking
   const [participantRatings, setParticipantRatings] = useState<
     Map<string, ParticipantRating>
@@ -741,42 +744,8 @@ export const CooperativeQuizPlayer: React.FC = () => {
       // Quiz finished - check if in round context
       console.log('Quiz finished, roundContext:', roundContext);
       if (roundContext) {
-        console.log('Navigating to quiz-round-player with state:', {
-          quizRoundId: roundContext.quizRoundId,
-          roundIndex: roundContext.roundIndex + 1,
-          isHost: true,
-          participants: allParticipants,
-          roomId: roomId
-        });
-        // Navigate back to QuizRoundPlayer for next round
-        navigate('/quiz-round-player', {
-          state: {
-            quizRoundId: roundContext.quizRoundId,
-            roundIndex: roundContext.roundIndex + 1,
-            isHost: true,
-            participants: allParticipants,
-            roomId: roomId
-          }
-        });
-
-        // Notify guests to navigate to next round
-        if (wsRef.current) {
-          const message = {
-            type: 'quiz_round_next',
-            data: {
-              quizRoundId: roundContext.quizRoundId,
-              roundIndex: roundContext.roundIndex + 1,
-            },
-            timestamp: new Date().toISOString(),
-          };
-          console.log('Host broadcasting quiz_round_next message:', message);
-          try {
-            wsRef.current.send(JSON.stringify(message));
-            console.log('quiz_round_next message sent successfully');
-          } catch (e) {
-            console.warn('Failed to broadcast next round navigation:', e);
-          }
-        }
+        // Show intermediate round ratings first
+        setShowRoundRatings(true);
       } else {
         console.log('No roundContext, calling finishQuiz');
         void finishQuiz();
@@ -794,6 +763,8 @@ export const CooperativeQuizPlayer: React.FC = () => {
         correct_answers:
           rating.total_score > 0 ? Math.floor(rating.total_score / 10) : 0,
         total_questions: questions.length,
+        classic_points: rating.total_score,
+        jeopardy_dollars: 0,
       })),
     };
 
@@ -858,6 +829,121 @@ export const CooperativeQuizPlayer: React.FC = () => {
           <div className="loading-spinner">⟳</div>
           <p>Loading quiz...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (showRoundRatings) {
+    const rankingRows = allParticipants
+      .filter(p => p.is_active && !p.is_spectator && !p.is_host)
+      .map(p => {
+        const r = participantRatings.get(p.id);
+        return {
+          participant_id: p.id,
+          participant_name: p.guest_name || r?.participant_name || 'Player',
+          total_score: r?.total_score ?? 0,
+          guest_avatar: p.guest_avatar ?? null,
+        };
+      })
+      .sort((a, b) => b.total_score - a.total_score);
+
+    return (
+      <div className="cooperative-quiz-player">
+        <motion.div
+          className="quiz-results"
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+        >
+          <h1>Round Complete!</h1>
+
+          <div className="final-rankings">
+            <h2>Round Rankings</h2>
+
+            {rankingRows.map((row, index) => {
+              const avatarUrl = row.guest_avatar ? row.guest_avatar : null;
+
+              return (
+                <div key={row.participant_id} className="ranking-item">
+                  <span className="rank">#{index + 1}</span>
+
+                  <div className="ranking-user">
+                    {avatarUrl?.startsWith('http') ? (
+                      <img className="ranking-avatar" src={avatarUrl} alt={row.participant_name} />
+                    ) : (
+                      <div className="ranking-avatar placeholder">
+                        {avatarUrl}
+                      </div>
+                    )}
+
+                    <span className="name">{row.participant_name}</span>
+                  </div>
+
+                  <span className="score">{row.total_score} pts</span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="button-group">
+            {isHost && roundContext && (
+              <button className="next-btn" onClick={() => {
+                // Broadcast round results so QuizRoundPlayer can accumulate classic points
+                if (wsRef.current) {
+                  try {
+                    const finals = Array.from(participantRatings.values()).map(r => ({
+                      participant_id: r.participant_id,
+                      participant_name: r.participant_name,
+                      total_score: r.total_score,
+                      rating_change: 0,
+                      classic_points: r.total_score,
+                      jeopardy_dollars: 0,
+                    }));
+                    wsRef.current.send(JSON.stringify({
+                      type: 'quiz_round_results',
+                      data: { final_ratings: finals },
+                      timestamp: new Date().toISOString(),
+                    }));
+                    console.log('Broadcasted quiz_round_results with classic finals');
+                  } catch (e) {
+                    console.warn('Failed to broadcast quiz_round_results:', e);
+                  }
+                }
+
+                // Navigate to next round
+                navigate('/quiz-round-player', {
+                  state: {
+                    quizRoundId: roundContext.quizRoundId,
+                    roundIndex: roundContext.roundIndex + 1,
+                    isHost: true,
+                    participants: allParticipants,
+                    roomId: roomId
+                  }
+                });
+
+                // Notify guests to navigate to next round
+                if (wsRef.current) {
+                  const message = {
+                    type: 'quiz_round_next',
+                    data: {
+                      quizRoundId: roundContext.quizRoundId,
+                      roundIndex: roundContext.roundIndex + 1,
+                    },
+                    timestamp: new Date().toISOString(),
+                  };
+                  console.log('Host broadcasting quiz_round_next message:', message);
+                  try {
+                    wsRef.current.send(JSON.stringify(message));
+                    console.log('quiz_round_next message sent successfully');
+                  } catch (e) {
+                    console.warn('Failed to broadcast next round navigation:', e);
+                  }
+                }
+              }}>
+                Next Round
+              </button>
+            )}
+          </div>
+        </motion.div>
       </div>
     );
   }

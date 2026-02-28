@@ -8,6 +8,9 @@ type RatingRow = {
   participant_name: string;
   total_score: number;
   rating_change?: number;
+  // Extended for total ratings - separate Jeopardy and Classic scoring
+  jeopardy_dollars?: number;
+  classic_points?: number;
 };
 
 type LocationState = {
@@ -51,6 +54,30 @@ export const QuizRoundPlayer: React.FC = () => {
 
   const [roundIndex, setRoundIndex] = useState<number>(nav?.roundIndex ?? 0);
   const [finalRatings, setFinalRatings] = useState<RatingRow[] | null>(nav?.finalRatings ?? null);
+  // Accumulate ratings across completed quizzes in this round (by participant)
+  const [accumulated, setAccumulated] = useState<Record<string, { name: string; jeopardy_dollars: number; classic_points: number }>>({});
+
+  // Persist/restore accumulated totals so they survive navigation between screens
+  useEffect(() => {
+    if (!quizRoundId) return;
+    try {
+      const raw = localStorage.getItem(`qr_accum_${quizRoundId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, { name: string; jeopardy_dollars: number; classic_points: number }>;
+        if (parsed && typeof parsed === 'object') {
+          setAccumulated(prev => ({ ...parsed, ...prev }));
+        }
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quizRoundId]);
+
+  useEffect(() => {
+    if (!quizRoundId) return;
+    try {
+      localStorage.setItem(`qr_accum_${quizRoundId}` , JSON.stringify(accumulated));
+    } catch {}
+  }, [quizRoundId, accumulated]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const mountedRef = useRef(true);
@@ -63,7 +90,7 @@ export const QuizRoundPlayer: React.FC = () => {
   console.log('ITEMS:', items)
 
   const currentItem = items[roundIndex] ?? null;
-  const isLast = items.length > 0 ? roundIndex >= items.length - 1 : true;
+  const isLast = items.length === 0 ? true : (items.length > 0 ? roundIndex >= items.length - 1 : true);
 
   console.log('Round debug:', {
     isHost,
@@ -118,6 +145,25 @@ export const QuizRoundPlayer: React.FC = () => {
   useEffect(() => {
     // location.key changes on navigation even to same path
     setFinalRatings(nav?.finalRatings ?? null);
+    // Merge any ratings passed via navigation into the accumulator
+    if (Array.isArray(nav?.finalRatings) && nav!.finalRatings!.length > 0) {
+      setAccumulated((prev) => {
+        const next = { ...prev };
+        for (const r of nav!.finalRatings!) {
+          const pid = r.participant_id;
+          const name = r.participant_name;
+          const jd = r.jeopardy_dollars ?? 0;
+          const cp = r.classic_points ?? 0;
+          const cur = next[pid] ?? { name, jeopardy_dollars: 0, classic_points: 0 };
+          next[pid] = {
+            name: cur.name || name,
+            jeopardy_dollars: cur.jeopardy_dollars + jd,
+            classic_points: cur.classic_points + cp,
+          };
+        }
+        return next;
+      });
+    }
     if (typeof nav?.roundIndex === 'number') {
       setRoundIndex(nav.roundIndex);
     }
@@ -150,7 +196,80 @@ export const QuizRoundPlayer: React.FC = () => {
 
         if (type === 'quiz_round_results') {
           const finals = (data?.final_ratings ?? null) as RatingRow[] | null;
-          if (Array.isArray(finals)) setFinalRatings(finals);
+          if (Array.isArray(finals)) {
+            setFinalRatings(finals);
+            // Also merge into accumulator
+            setAccumulated((prev) => {
+              const next = { ...prev };
+              for (const r of finals) {
+                const pid = r.participant_id;
+                const name = r.participant_name;
+                const jd = r.jeopardy_dollars ?? 0;
+                const cp = r.classic_points ?? 0;
+                const cur = next[pid] ?? { name, jeopardy_dollars: 0, classic_points: 0 };
+                next[pid] = {
+                  name: cur.name || name,
+                  jeopardy_dollars: cur.jeopardy_dollars + jd,
+                  classic_points: cur.classic_points + cp,
+                };
+              }
+              return next;
+            });
+          }
+        }
+
+        // Accept end-of-quiz results from cooperative classic and jeopardy players and accumulate
+        if (type === 'cooperative_quiz_end') {
+          const parts = (data?.participants ?? []) as Array<{ participant_id: string; participant_name: string; total_score: number }>;
+          if (Array.isArray(parts) && parts.length > 0) {
+            setAccumulated((prev) => {
+              const next = { ...prev };
+              for (const p of parts) {
+                const cur = next[p.participant_id] ?? { name: p.participant_name, jeopardy_dollars: 0, classic_points: 0 };
+                next[p.participant_id] = {
+                  name: cur.name || p.participant_name,
+                  jeopardy_dollars: cur.jeopardy_dollars,
+                  classic_points: cur.classic_points + (p.total_score || 0),
+                };
+              }
+              return next;
+            });
+          }
+        }
+
+        if (type === 'cooperative_jeopardy_quiz_end') {
+          // Some senders emit final_ratings, others may send participants. Support both.
+          const finals = (data?.final_ratings ?? null) as Array<{ participant_id: string; participant_name: string; total_score: number }> | null;
+          if (Array.isArray(finals) && finals.length > 0) {
+            setAccumulated((prev) => {
+              const next = { ...prev };
+              for (const r of finals) {
+                const cur = next[r.participant_id] ?? { name: r.participant_name, jeopardy_dollars: 0, classic_points: 0 };
+                next[r.participant_id] = {
+                  name: cur.name || r.participant_name,
+                  jeopardy_dollars: cur.jeopardy_dollars + (r.total_score || 0),
+                  classic_points: cur.classic_points,
+                };
+              }
+              return next;
+            });
+          } else {
+            const parts = (data?.participants ?? []) as Array<{ participant_id: string; participant_name: string; total_score: number }>;
+            if (Array.isArray(parts) && parts.length > 0) {
+              setAccumulated((prev) => {
+                const next = { ...prev };
+                for (const p of parts) {
+                  const cur = next[p.participant_id] ?? { name: p.participant_name, jeopardy_dollars: 0, classic_points: 0 };
+                  next[p.participant_id] = {
+                    name: cur.name || p.participant_name,
+                    jeopardy_dollars: cur.jeopardy_dollars + (p.total_score || 0),
+                    classic_points: cur.classic_points,
+                  };
+                }
+                return next;
+              });
+            }
+          }
         }
 
         // You already use these types in your lobby/players:
@@ -315,6 +434,104 @@ export const QuizRoundPlayer: React.FC = () => {
     );
   }
 
+  // Show total ratings strictly after the last item has been completed
+  const shouldShowTotalRatings = items.length > 0 && roundIndex >= items.length;
+  console.log('=== TOTAL RATINGS DEBUG ===');
+  console.log('shouldShowTotalRatings:', shouldShowTotalRatings);
+  console.log('items.length:', items.length);
+  console.log('roundIndex:', roundIndex);
+  console.log('roundIndex >= items.length:', roundIndex >= items.length);
+  console.log('================================');
+
+  if (shouldShowTotalRatings) {
+    console.log('SHOWING TOTAL RATINGS NOW!!!');
+    // Prefer accumulated multi-quiz totals; otherwise fall back to any provided finalRatings; otherwise derive empty rows
+    const totalRatingsData: RatingRow[] = Object.keys(accumulated).length > 0
+      ? Object.entries(accumulated).map(([pid, v]) => ({
+          participant_id: pid,
+          participant_name: v.name,
+          total_score: (v.jeopardy_dollars || 0) + (v.classic_points || 0),
+          jeopardy_dollars: v.jeopardy_dollars || 0,
+          classic_points: v.classic_points || 0,
+        }))
+      : ((finalRatings && finalRatings.length > 0)
+          ? finalRatings
+          : (participants && participants.length > 0
+            ? participants
+                .filter(p => !p.is_host && !p.is_spectator)
+                .map(p => ({
+                  participant_id: p.id,
+                  participant_name: p.guest_name || 'Unknown',
+                  total_score: 0,
+                  rating_change: 0,
+                  jeopardy_dollars: 0,
+                  classic_points: 0,
+                }))
+            : []));
+
+    const sortedRatings = totalRatingsData.slice().sort((a, b) => {
+      const jdA = a.jeopardy_dollars ?? 0;
+      const jdB = b.jeopardy_dollars ?? 0;
+      if (jdB !== jdA) return jdB - jdA;
+      const cpA = a.classic_points ?? 0;
+      const cpB = b.classic_points ?? 0;
+      return cpB - cpA;
+    });
+
+    return (
+      <div style={{ minHeight: '100vh', padding: 24 }}>
+        <h1>Total Ratings</h1>
+
+        <div style={{ marginTop: 8 }}>
+          <strong>Quiz Round:</strong> {quizRound.title}
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <p>All rounds completed! Here are the total ratings:</p>
+
+          <div style={{ marginTop: 20 }}>
+            <h3>Final Rankings</h3>
+            <ol style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+              {sortedRatings.map((r, index) => (
+                <li key={r.participant_id} style={{
+                  margin: '10px 0',
+                  padding: '12px 16px',
+                  borderRadius: 8,
+                  backgroundColor: index === 0 ? '#fff8e1' : index === 1 ? '#f4f6f8' : index === 2 ? '#fff3e0' : '#ffffff',
+                  border: index < 3 ? '2px solid #ffb300' : '1px solid #e5e7eb',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.06)'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600 }}>{r.participant_name}</span>
+                    <div style={{ textAlign: 'right' }}>
+                      <div>
+                        <div style={{ fontWeight: 'bold', color: '#2c3e50' }}>
+                          ${r.jeopardy_dollars ?? 0}
+                        </div>
+                        <div style={{ fontSize: '0.9em', color: '#666' }}>
+                          +{r.classic_points ?? 0} pts
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: '0.8em', color: '#666' }}>
+                    Rank #{index + 1}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+          <button type="button" onClick={backToDashboard}>
+            Back to dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!currentItem) {
     return (
       <div style={{ minHeight: '100vh', padding: 24 }}>
@@ -324,53 +541,6 @@ export const QuizRoundPlayer: React.FC = () => {
         <button type="button" onClick={backToDashboard}>
           Back to dashboard
         </button>
-      </div>
-    );
-  }
-
-  // Results screen
-  if (finalRatings) {
-    return (
-      <div style={{ minHeight: '100vh', padding: 24 }}>
-        <h1>Rating</h1>
-
-        <div style={{ marginTop: 8 }}>
-          <strong>Round:</strong> {quizRound.title}
-        </div>
-
-        <div style={{ marginTop: 8 }}>
-          <strong>Quiz:</strong> {currentItem.quiz_title} ({currentItem.quiz_type})
-        </div>
-
-        <div style={{ marginTop: 16 }}>
-          <ol>
-            <ol className="qrpList">
-              {finalRatings
-                .slice()
-                .sort((a, b) => b.total_score - a.total_score)
-                .map((r) => (
-                  <li className="qrpListItem" key={r.participant_id}>
-                    <span>{r.participant_name}</span>
-                    <span className="qrpScore">{r.total_score}</span>
-                  </li>
-                ))}
-            </ol>
-          </ol>
-        </div>
-
-        <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-          {isHost ? (
-            <button type="button" onClick={handleNext}>
-              {isLast ? 'Final rating' : 'Next round'}
-            </button>
-          ) : (
-            <div>Waiting for host…</div>
-          )}
-
-          <button type="button" onClick={backToDashboard}>
-            Back to dashboard
-          </button>
-        </div>
       </div>
     );
   }

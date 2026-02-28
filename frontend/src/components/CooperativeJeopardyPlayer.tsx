@@ -100,8 +100,14 @@ function getCanonicalShortAnswerText(question: any): string | null {
   const fromField = (question?.correct_answer as string | undefined)?.trim();
   if (fromField) return fromField;
 
-  const fromAnswers = (question?.answers || []).find((a: any) => a.is_correct)?.answer?.trim();
-  return fromAnswers || null;
+  // Prefer a non-empty correct answer string from answers list
+  const answers = (question?.answers || []) as Array<{ answer?: string; is_correct?: boolean }>;
+  const nonEmptyCorrect = answers.find(a => !!a.is_correct && !!(a.answer || '').trim());
+  if (nonEmptyCorrect) return String(nonEmptyCorrect.answer).trim();
+
+  // Fallback: any non-empty answer text if data is malformed
+  const anyNonEmpty = answers.find(a => !!(a.answer || '').trim());
+  return anyNonEmpty ? String(anyNonEmpty.answer).trim() : null;
 }
 
 function isQuestionCorrect(question: any, answerIdOrText: string): boolean {
@@ -175,6 +181,7 @@ export const CooperativeJeopardyPlayer: React.FC<CooperativeJeopardyPlayerProps>
       isHost: !!s.isHost,
       currentParticipantId: s.currentParticipantId ?? null,
       participants: s.participants ?? [],
+      roundContext: s.roundContext, // Add roundContext for Quiz round support
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -444,7 +451,8 @@ export const CooperativeJeopardyPlayer: React.FC<CooperativeJeopardyPlayerProps>
         rating_change: 0,
       }));
 
-      const nextTotalsForRef = nextTotals;
+      // Persist updated totals so FINAL stage computes non-zero
+      totalsRef.current = nextTotals;
       await api.sendCooperativeJeopardyQuestionResults(wsRef.current, nav.roomId, {
         question_id: currentQuestion.id!,
         all_answers,
@@ -505,30 +513,27 @@ export const CooperativeJeopardyPlayer: React.FC<CooperativeJeopardyPlayerProps>
         })
       );
 
-      // if launched from a round -> return to round screen
+      // if launched from a round -> show final ratings first, host controls navigation
       const rc = (nav as any).roundContext; // or nav.roundContext if typed
       if (rc?.quizRoundId && typeof rc.roundIndex === 'number') {
         // (optional) broadcast "round results" so guests can show rating too
         wsRef.current?.send(
           JSON.stringify({
             type: 'quiz_round_results',
-            data: { final_ratings: finals },
+            data: { 
+              final_ratings: finals.map(r => ({
+                ...r,
+                jeopardy_dollars: r.total_score,
+                classic_points: 0,
+              }))
+            },
             timestamp: new Date().toISOString(),
           })
         );
 
-        navigate(rc.returnTo ?? '/quiz-round-player', {
-          replace: true,
-          state: {
-            roomId: nav.roomId,
-            quizRoundId: rc.quizRoundId,
-            roundIndex: rc.roundIndex,
-            isHost: nav.isHost,
-            currentParticipantId: nav.currentParticipantId ?? null,
-            participants: participantsRef.current,
-            finalRatings: finals,
-          },
-        });
+        // Show final ratings instead of auto-navigating - host will click "Next round" button
+        setFinalRatings(finals);
+        setStage('FINAL');
         return;
       }
 
@@ -843,6 +848,24 @@ export const CooperativeJeopardyPlayer: React.FC<CooperativeJeopardyPlayerProps>
 
           setFinalRatings(finals);
           setStage('FINAL');
+          break;
+        }
+
+        case 'quiz_round_next': {
+          // Participants follow host to next round
+          if (!nav.isHost && nav.roundContext) {
+            console.log('Participant received quiz_round_next message, navigating to next round:', data);
+            navigate('/quiz-round-player', {
+              state: {
+                quizRoundId: data.quizRoundId,
+                roundIndex: data.roundIndex,
+                isHost: false,
+                participants: participantsRef.current,
+                roomId: nav.roomId,
+                currentParticipantId: nav.currentParticipantId
+              }
+            });
+          }
           break;
         }
 
@@ -1309,12 +1332,55 @@ export const CooperativeJeopardyPlayer: React.FC<CooperativeJeopardyPlayerProps>
               </div>
 
               <div className="cj-resultsFooter">
-                <button className="cj-btn cj-btnPrimary" onClick={() => navigate(-1)}>
-                  Back
-                </button>
-                <button className="cj-btn cj-btnGhost" onClick={() => navigate('/', { replace: true })}>
-                  Home
-                </button>
+                {nav.roundContext && nav.isHost ? (
+                  <button 
+                    className="cj-btn cj-btnPrimary" 
+                    onClick={() => {
+                      navigate('/quiz-round-player', {
+                        state: {
+                          quizRoundId: nav.roundContext!.quizRoundId,
+                          roundIndex: nav.roundContext!.roundIndex + 1,
+                          isHost: true,
+                          participants: participantsRef.current,
+                          roomId: nav.roomId,
+                          currentParticipantId: nav.currentParticipantId
+                        }
+                      });
+
+                      // Notify guests to navigate to next round
+                      if (wsRef.current) {
+                        const message = {
+                          type: 'quiz_round_next',
+                          data: {
+                            quizRoundId: nav.roundContext!.quizRoundId,
+                            roundIndex: nav.roundContext!.roundIndex + 1,
+                          },
+                          timestamp: new Date().toISOString(),
+                        };
+                        console.log('Host broadcasting quiz_round_next message:', message);
+                        try {
+                          wsRef.current.send(JSON.stringify(message));
+                          console.log('quiz_round_next message sent successfully');
+                        } catch (e) {
+                          console.warn('Failed to broadcast next round navigation:', e);
+                        }
+                      }
+                    }}
+                  >
+                    Next round
+                  </button>
+                ) : nav.roundContext ? (
+                  <div className="cj-muted">Waiting for host to continue…</div>
+                ) : (
+                  <>
+                    <button className="cj-btn cj-btnPrimary" onClick={() => navigate(-1)}>
+                      Back
+                    </button>
+                    <button className="cj-btn cj-btnGhost" onClick={() => navigate('/', { replace: true })}>
+                      Home
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           )}
