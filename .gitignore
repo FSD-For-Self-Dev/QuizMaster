@@ -11,3 +11,6 @@ bash.exe.stackdump
 
 *.db
 quizmaster.db
+
+.idea/
+.gigaide/
