@@ -33,6 +33,7 @@ async def upload_audio(file: UploadFile = File(...)):
 
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg",
+    "image/jfif",
     "image/jpg",
     "image/png",
     "image/gif",
@@ -47,7 +48,7 @@ async def upload_image(
     if file.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
             status_code=400,
-            detail="Only image files are allowed: .jpg, .jpeg, .png, .gif, .webp"
+            detail="Only image files are allowed: .jpg, .jpeg, .jfif, .png, .gif, .webp"
         )
 
     # Ensure directory exists
